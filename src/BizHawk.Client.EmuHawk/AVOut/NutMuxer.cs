@@ -274,6 +274,11 @@ namespace BizHawk.Client.EmuHawk
 		// audio packets waiting to be written
 		private readonly Queue<NutFrame> _audioQueue;
 
+		// newest frame seen per stream; the older of the two is the watermark below which no older
+		// frame can still arrive (each stream is internally ordered)
+		private NutFrame _newestAudio, _newestVideo;
+		private const int MaxHeldVideoFrames = 120;
+
 		/// <summary>
 		/// write out the main header
 		/// </summary>
@@ -491,10 +496,8 @@ namespace BizHawk.Client.EmuHawk
 			ArrayPool<byte>.Shared.Return(data);
 			_videoOpts++;
 			_videoQueue.Enqueue(f);
-			while (_audioQueue.Count > 0 && f >= _audioQueue.Peek())
-			{
-				_audioQueue.Dequeue().WriteData(_output);
-			}
+			_newestVideo = f;
+			Drain(final: false);
 		}
 
 		/// <summary>write an audio frame to the stream</summary>
@@ -520,9 +523,50 @@ namespace BizHawk.Client.EmuHawk
 			ArrayPool<byte>.Shared.Return(data);
 			_audioPts += (ulong)samples.Length / (ulong)_avParams.Channels;
 			_audioQueue.Enqueue(f);
-			while (_videoQueue.Count > 0 && f >= _videoQueue.Peek())
+			_newestAudio = f;
+			Drain(final: false);
+		}
+
+		/// <summary>
+		/// write queued frames up to the watermark: the older of the newest frames seen per stream
+		/// (compared across timebases with the NutFrame operators), below which no older frame can
+		/// still arrive; emitting only at-or-below it keeps the interleave strictly sorted. the old
+		/// one-sided flushes (each writer drained only the other stream's queue) could emit a frame
+		/// past a still-queued older one
+		/// </summary>
+		private void Drain(bool final)
+		{
+			NutFrame watermark;
+			if (final)
 			{
-				_videoQueue.Dequeue().WriteData(_output);
+				watermark = null;
+			}
+			else if (_newestAudio is not null && _newestVideo is not null)
+			{
+				watermark = _newestAudio <= _newestVideo ? _newestAudio : _newestVideo;
+			}
+			else if (_videoQueue.Count > MaxHeldVideoFrames)
+			{
+				watermark = _newestVideo;
+			}
+			else
+			{
+				return;
+			}
+
+			while (true)
+			{
+				var hasA = _audioQueue.Count > 0 && (watermark is null || _audioQueue.Peek() <= watermark);
+				var hasV = _videoQueue.Count > 0 && (watermark is null || _videoQueue.Peek() <= watermark);
+				if (!hasA && !hasV) break;
+				if (hasA && hasV)
+				{
+					(_audioQueue.Peek() <= _videoQueue.Peek() ? _audioQueue : _videoQueue).Dequeue().WriteData(_output);
+				}
+				else
+				{
+					(hasA ? _audioQueue : _videoQueue).Dequeue().WriteData(_output);
+				}
 			}
 		}
 
@@ -582,27 +626,7 @@ namespace BizHawk.Client.EmuHawk
 			}
 
 			// flush any remaining queued packets
-			while (_audioQueue.Count > 0 && _videoQueue.Count > 0)
-			{
-				if (_audioQueue.Peek() <= _videoQueue.Peek())
-				{
-					_audioQueue.Dequeue().WriteData(_output);
-				}
-				else
-				{
-					_videoQueue.Dequeue().WriteData(_output);
-				}
-			}
-
-			while (_audioQueue.Count > 0)
-			{
-				_audioQueue.Dequeue().WriteData(_output);
-			}
-
-			while (_videoQueue.Count > 0)
-			{
-				_videoQueue.Dequeue().WriteData(_output);
-			}
+			Drain(final: true);
 
 			_output.Close();
 			_output = null;

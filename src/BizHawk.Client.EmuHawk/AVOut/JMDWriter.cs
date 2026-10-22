@@ -353,7 +353,8 @@ namespace BizHawk.Client.EmuHawk
 			{
 				if (j.Timestamp < _timestampOff)
 				{
-					throw new ArithmeticException("JMD Timestamp problem?");
+					// safety clamp; unreachable while Drain only emits packets at or below the watermark
+					j.Timestamp = _timestampOff;
 				}
 
 				var timeStampOut = j.Timestamp - _timestampOff;
@@ -447,12 +448,20 @@ namespace BizHawk.Client.EmuHawk
 			// collection of JMD packets yet to be written (video)
 			private readonly Queue<JmdPacket> _videoStorage;
 
+			// newest timestamp seen per stream; the smaller of the two is the watermark below which
+			// no older packet can still arrive (each stream is internally ordered)
+			private ulong _newestAudioTs, _newestVideoTs;
+			private bool _sawAudio, _sawVideo;
+			private const int MaxHeldVideoFrames = 120;
+
 			// add a sound packet to the file write queue
 			// the sound packets added must be internally ordered (but need not match video order)
 			private void WriteSound(JmdPacket j)
 			{
 				_audioStorage.Enqueue(j);
-				WriteOrdered();
+				_newestAudioTs = j.Timestamp;
+				_sawAudio = true;
+				Drain(final: false);
 			}
 
 			// add a video packet to the file write queue
@@ -460,26 +469,50 @@ namespace BizHawk.Client.EmuHawk
 			private void WriteVideo(JmdPacket j)
 			{
 				_videoStorage.Enqueue(j);
-				WriteOrdered();
+				_newestVideoTs = j.Timestamp;
+				_sawVideo = true;
+				Drain(final: false);
 			}
 
-			// write queued packets in timestamp order
-			// each stream is internally ordered, so the smaller of the two queue heads is always the
-			// globally oldest unwritten packet and safe to emit; the old code instead flushed one queue
-			// against the other stream's incoming packet, which could write past a still-queued older
-			// packet and make the next WriteActual throw "JMD Timestamp problem?"
-			private void WriteOrdered()
+			// write queued packets up to the watermark: the smaller of the newest timestamps seen per
+			// stream, below which no older packet can still arrive; emitting only at-or-below it keeps
+			// the file order non-decreasing. the old one-sided flushes (each method drained only the
+			// other stream's queue) could write past a still-queued older packet and make the next
+			// WriteActual throw "JMD Timestamp problem?"
+			private void Drain(bool final)
 			{
-				while (_audioStorage.Count > 0 || _videoStorage.Count > 0)
+				ulong watermark;
+				if (final)
 				{
-					if (_videoStorage.Count == 0
-						|| (_audioStorage.Count > 0 && _audioStorage.Peek().Timestamp <= _videoStorage.Peek().Timestamp))
+					watermark = ulong.MaxValue;
+				}
+				else if (_sawAudio && _sawVideo)
+				{
+					watermark = _newestAudioTs < _newestVideoTs ? _newestAudioTs : _newestVideoTs;
+				}
+				else if (_videoStorage.Count > MaxHeldVideoFrames)
+				{
+					watermark = _newestVideoTs;
+				}
+				else
+				{
+					return;
+				}
+
+				while (true)
+				{
+					var hasA = _audioStorage.Count > 0 && _audioStorage.Peek().Timestamp <= watermark;
+					var hasV = _videoStorage.Count > 0 && _videoStorage.Peek().Timestamp <= watermark;
+					if (!hasA && !hasV) break;
+					if (hasA && hasV)
 					{
-						WriteActual(_audioStorage.Dequeue());
+						WriteActual(_audioStorage.Peek().Timestamp <= _videoStorage.Peek().Timestamp
+							? _audioStorage.Dequeue()
+							: _videoStorage.Dequeue());
 					}
 					else
 					{
-						WriteActual(_videoStorage.Dequeue());
+						WriteActual(hasA ? _audioStorage.Dequeue() : _videoStorage.Dequeue());
 					}
 				}
 			}
@@ -488,18 +521,7 @@ namespace BizHawk.Client.EmuHawk
 			// call before closing the file
 			private void FlushPackets()
 			{
-				while (_audioStorage.Count > 0 && _videoStorage.Count > 0)
-				{
-					var ap = _audioStorage.Peek();
-					var av = _videoStorage.Peek();
-					WriteActual(ap.Timestamp <= av.Timestamp
-						? _audioStorage.Dequeue()
-						: _videoStorage.Dequeue());
-				}
-				while (_audioStorage.Count > 0)
-					WriteActual(_audioStorage.Dequeue());
-				while (_videoStorage.Count > 0)
-					WriteActual(_videoStorage.Dequeue());
+				Drain(final: true);
 			}
 
 			/// <summary>

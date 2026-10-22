@@ -114,7 +114,7 @@ namespace BizHawk.Client.EmuHawk
 
 			_ffmpeg.BeginErrorReadLine();
 
-			_muxer = new NutMuxer(_width, _height, _fpsnum, _fpsden, _sampleRate, _channels, _ffmpeg.StandardInput.BaseStream);
+			_muxer = new NutMuxer(_width, _height, _fpsnum, _fpsden, _sampleRate, _channels, new WedgeGuardStream(_ffmpeg.StandardInput.BaseStream, this));
 		}
 
 		/// <summary>
@@ -140,11 +140,92 @@ namespace BizHawk.Client.EmuHawk
 		}
 
 		/// <summary>
+		/// how long a single pipe write may block before we conclude ffmpeg stopped consuming
+		/// </summary>
+		private const int PipeWriteTimeoutMs = 10000;
+
+		private void KillWedgedFfmpeg()
+		{
+			try
+			{
+				_ffmpeg.Kill();
+				_ffmpeg.WaitForExit(5000);
+			}
+			catch
+			{
+				// already gone or inaccessible; the throwing write still reports the wedge
+			}
+		}
+
+		/// <summary>
+		/// wraps the ffmpeg stdin pipe so a full pipe cannot block the calling thread forever:
+		/// a write making no progress for <see cref="PipeWriteTimeoutMs"/> means ffmpeg wedged, so the
+		/// process is killed and the write throws (surfaced as a "dumping died" dialog carrying ffmpeg's
+		/// last stderr lines) instead of hanging the whole client silently.
+		/// skipping the write instead is not an option: NUT is a length-prefixed byte stream, and dropped
+		/// bytes would corrupt every later packet anyway
+		/// </summary>
+		private sealed class WedgeGuardStream : Stream
+		{
+			private readonly Stream _inner;
+			private readonly FFmpegWriter _owner;
+			private bool _wedged;
+
+			public WedgeGuardStream(Stream inner, FFmpegWriter owner)
+			{
+				_inner = inner;
+				_owner = owner;
+			}
+
+			public override bool CanRead => false;
+			public override bool CanSeek => false;
+			public override bool CanWrite => true;
+			public override long Length => throw new NotSupportedException();
+			public override long Position
+			{
+				get => throw new NotSupportedException();
+				set => throw new NotSupportedException();
+			}
+
+			public override void Flush() => _inner.Flush();
+			public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+			public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+			public override void SetLength(long value) => throw new NotSupportedException();
+
+			public override void Write(byte[] buffer, int offset, int count)
+			{
+				if (_wedged) throw new IOException("ffmpeg pipe already wedged");
+
+				var ar = _inner.BeginWrite(buffer, offset, count, null, null);
+				if (!ar.AsyncWaitHandle.WaitOne(PipeWriteTimeoutMs))
+				{
+					_wedged = true;
+					_owner.KillWedgedFfmpeg();
+					throw new IOException($"ffmpeg did not consume a pipe write for {PipeWriteTimeoutMs} ms; process killed");
+				}
+
+				_inner.EndWrite(ar);
+			}
+
+			// the pipe's lifetime belongs to the ffmpeg process object, not to us
+			protected override void Dispose(bool disposing)
+			{
+			}
+		}
+
+		/// <summary>
 		/// finishes an ffmpeg process
 		/// </summary>
 		private void CloseFileSegment()
 		{
-			_muxer.Finish();
+			try
+			{
+				_muxer.Finish();
+			}
+			catch (IOException)
+			{
+				// pipe already dead (wedged ffmpeg was killed); nothing left to flush
+			}
 			//ffmpeg.StandardInput.Close();
 
 			// how long should we wait here?

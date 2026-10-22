@@ -448,36 +448,40 @@ namespace BizHawk.Client.EmuHawk
 			private readonly Queue<JmdPacket> _videoStorage;
 
 			// add a sound packet to the file write queue
-			// will be written when order-appropriate wrt video
 			// the sound packets added must be internally ordered (but need not match video order)
 			private void WriteSound(JmdPacket j)
 			{
-				while (_videoStorage.Count > 0)
-				{
-					var p = _videoStorage.Peek();
-					if (p.Timestamp <= j.Timestamp)
-						WriteActual(_videoStorage.Dequeue());
-					else
-						break;
-				}
-
 				_audioStorage.Enqueue(j);
+				WriteOrdered();
 			}
 
 			// add a video packet to the file write queue
-			// will be written when order-appropriate wrt audio
 			// the video packets added must be internally ordered (but need not match audio order)
 			private void WriteVideo(JmdPacket j)
 			{
-				while (_audioStorage.Count > 0)
-				{
-					var p = _audioStorage.Peek();
-					if (p.Timestamp <= j.Timestamp)
-						WriteActual(_audioStorage.Dequeue());
-					else
-						break;
-				}
 				_videoStorage.Enqueue(j);
+				WriteOrdered();
+			}
+
+			// write queued packets in timestamp order
+			// each stream is internally ordered, so the smaller of the two queue heads is always the
+			// globally oldest unwritten packet and safe to emit; the old code instead flushed one queue
+			// against the other stream's incoming packet, which could write past a still-queued older
+			// packet and make the next WriteActual throw "JMD Timestamp problem?"
+			private void WriteOrdered()
+			{
+				while (_audioStorage.Count > 0 || _videoStorage.Count > 0)
+				{
+					if (_videoStorage.Count == 0
+						|| (_audioStorage.Count > 0 && _audioStorage.Peek().Timestamp <= _videoStorage.Peek().Timestamp))
+					{
+						WriteActual(_audioStorage.Dequeue());
+					}
+					else
+					{
+						WriteActual(_videoStorage.Dequeue());
+					}
+				}
 			}
 
 			// flush all remaining JMDPackets to file

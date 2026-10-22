@@ -9,11 +9,14 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 		private byte[] _stateBuf = [ ];
 
 		/// <remarks>
-		/// a Dolphin savestate serializes the whole machine and runs to tens of megabytes, so buffering one per
-		/// frame for rewind would be prohibitively expensive in both memory and time.
-		/// users who really want rewind can still force it with <c>Config.Rewind.AllowSlowStates</c>.
+		/// must be false for TAStudio's state managers to capture any savestate history at all
+		/// (both managers skip capture for AvoidRewind cores, which would make every seek restart
+		/// from the beginning of the movie). Dolphin states are large but workable, the same
+		/// tradeoff PPSSPP makes; the main form's rewind buffer remains bounded by
+		/// <c>Config.Rewind.BufferSize</c> and can be disabled via <c>Config.Rewind.Enabled</c>
+		/// without affecting TAStudio seeking.
 		/// </remarks>
-		public bool AvoidRewind => true;
+		public bool AvoidRewind => false;
 
 		public void SaveStateBinary(BinaryWriter writer)
 		{

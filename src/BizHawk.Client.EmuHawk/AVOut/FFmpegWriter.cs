@@ -44,6 +44,11 @@ namespace BizHawk.Client.EmuHawk
 		private Queue<string> _stderr;
 
 		/// <summary>
+		/// guards <see cref="_stderr"/>, which is touched by both the stderr event thread and the main thread
+		/// </summary>
+		private readonly object _stderrLock = new();
+
+		/// <summary>
 		/// number of lines of stderr to buffer
 		/// </summary>
 		private const int Consolebuffer = 5;
@@ -119,12 +124,18 @@ namespace BizHawk.Client.EmuHawk
 		{
 			if (!string.IsNullOrEmpty(line.Data))
 			{
-				if (_stderr.Count == Consolebuffer)
+				lock (_stderrLock)
 				{
-					_stderr.Dequeue();
-				}
+					// a late event can race with segment teardown nulling out the queue
+					if (_stderr is null) return;
 
-				_stderr.Enqueue($"{line.Data}\n");
+					if (_stderr.Count == Consolebuffer)
+					{
+						_stderr.Dequeue();
+					}
+
+					_stderr.Enqueue($"{line.Data}\n");
+				}
 			}
 		}
 
@@ -143,9 +154,13 @@ namespace BizHawk.Client.EmuHawk
 				//               If WaitForExit(time) returns true, this call waits for message pump to clear out events.
 				_ffmpeg.WaitForExit();
 			}
+			lock (_stderrLock)
+			{
+				_stderr = null;
+			}
+
 			_ffmpeg.Dispose();
 			_ffmpeg = null;
-			_stderr = null;
 			_commandline = null;
 			_muxer = null;
 		}
@@ -170,10 +185,16 @@ namespace BizHawk.Client.EmuHawk
 			var s = new StringBuilder();
 			s.Append(_commandline);
 			s.Append('\n');
-			while (_stderr.Count > 0)
+			lock (_stderrLock)
 			{
-				var foo = _stderr.Dequeue();
-				s.Append(foo);
+				if (_stderr is not null)
+				{
+					while (_stderr.Count > 0)
+					{
+						var foo = _stderr.Dequeue();
+						s.Append(foo);
+					}
+				}
 			}
 
 			return s.ToString();

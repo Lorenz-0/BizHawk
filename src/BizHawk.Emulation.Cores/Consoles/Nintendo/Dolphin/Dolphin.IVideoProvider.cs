@@ -17,9 +17,37 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 
 		public int BufferHeight => _height;
 
-		public int VsyncNumerator => _core.Dolphin_GetVSyncNumerator();
+		/// <remarks>
+		/// the native side reports 0/1 until the VI timing registers are first written (earliest boot frames),
+		/// and the frontend divides by these values (A/V dumping, sound pacing), so hold the last known-good
+		/// ratio instead of passing the zeros through
+		/// </remarks>
+		private (int Num, int Den) _vsync = (60, 1);
 
-		public int VsyncDenominator => _core.Dolphin_GetVSyncDenominator();
+		private void RefreshVsync()
+		{
+			var num = _core.Dolphin_GetVSyncNumerator();
+			var den = _core.Dolphin_GetVSyncDenominator();
+			if (num != 0 && den != 0) _vsync = (num, den);
+		}
+
+		public int VsyncNumerator
+		{
+			get
+			{
+				RefreshVsync();
+				return _vsync.Num;
+			}
+		}
+
+		public int VsyncDenominator
+		{
+			get
+			{
+				RefreshVsync();
+				return _vsync.Den;
+			}
+		}
 
 		public int BackgroundColor => 0;
 

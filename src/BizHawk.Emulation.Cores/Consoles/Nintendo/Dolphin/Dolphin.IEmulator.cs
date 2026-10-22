@@ -43,7 +43,10 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 			// otherwise every frame is a non-lag frame once the input callback has run
 			if (_settings.GPULagFrames) IsLagFrame = gpuLagged;
 
-			if (renderSound) ProcessSound();
+			// drain unconditionally: the native mixer accumulates into its buffer every FrameStep,
+			// so skipping the drain (e.g. the future-frame loop steps with renderSound: false) would
+			// pile samples up and hand the frontend one giant chunk later
+			ProcessSound();
 
 			Frame++;
 			if (IsLagFrame) LagCount++;

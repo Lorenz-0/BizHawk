@@ -1,7 +1,10 @@
+using System.Buffers;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Diagnostics;
+using System.Threading;
 
 using BizHawk.Client.Common;
 using BizHawk.Common;
@@ -115,6 +118,10 @@ namespace BizHawk.Client.EmuHawk
 			_ffmpeg.BeginErrorReadLine();
 
 			_muxer = new NutMuxer(_width, _height, _fpsnum, _fpsden, _sampleRate, _channels, new WedgeGuardStream(_ffmpeg.StandardInput.BaseStream, this));
+
+			_jobs = new BlockingCollection<Job>(boundedCapacity: 8);
+			_pump = new Thread(PumpLoop) { IsBackground = true, Name = "FFmpegWriter pump" };
+			_pump.Start();
 		}
 
 		/// <summary>
@@ -214,10 +221,66 @@ namespace BizHawk.Client.EmuHawk
 		}
 
 		/// <summary>
+		/// one unit of work for the pump thread; exactly one of Video/Audio is set
+		/// </summary>
+		private sealed record Job(int[] Video, int VideoLen, short[] Audio);
+
+		private BlockingCollection<Job> _jobs;
+		private Thread _pump;
+		private volatile Exception _pumpError;
+
+		/// <summary>
+		/// writes queued frames to the muxer (and thus the ffmpeg pipe) off the main thread, so a pipe
+		/// that stops draining can never block the client UI; the bounded queue plus TryAdd timeout
+		/// turn a wedged ffmpeg into an exception on the calling thread instead of an infinite hang
+		/// </summary>
+		private void PumpLoop()
+		{
+			try
+			{
+				foreach (var j in _jobs.GetConsumingEnumerable())
+				{
+					if (j.Video is not null)
+					{
+						_muxer.WriteVideoFrame(j.Video.AsSpan(0, j.VideoLen));
+						ArrayPool<int>.Shared.Return(j.Video);
+					}
+					else
+					{
+						_muxer.WriteAudioFrame(j.Audio);
+					}
+				}
+			}
+			catch (Exception e)
+			{
+				_pumpError = e;
+				_jobs.CompleteAdding();
+			}
+		}
+
+		private void Enqueue(Job j)
+		{
+			if (_pumpError is not null) throw new Exception("ffmpeg pump died", _pumpError);
+			if (!_jobs.TryAdd(j, TimeSpan.FromSeconds(10)))
+			{
+				throw new TimeoutException($"ffmpeg not consuming: queued={_jobs.Count} exited={_ffmpeg.HasExited}\n{FfmpegGetError()}");
+			}
+		}
+
+		/// <summary>
 		/// finishes an ffmpeg process
 		/// </summary>
 		private void CloseFileSegment()
 		{
+			// let the pump finish everything it already accepted before the muxer writes EOR
+			_jobs?.CompleteAdding();
+			_pump?.Join();
+			_pump = null;
+			_jobs = null;
+			// pump failures already surfaced on the calling thread via Enqueue; don't rethrow here,
+			// CloseFileSegment also runs during abort/teardown
+			_pumpError = null;
+
 			try
 			{
 				_muxer.Finish();
@@ -309,18 +372,9 @@ namespace BizHawk.Client.EmuHawk
 			}
 
 			var video = source.GetVideoBuffer();
-			try
-			{
-				_muxer.WriteVideoFrame(video.AsSpan(0, _width * _height));
-			}
-			catch
-			{
-				_dialogParent.DialogController.ShowMessageBox($"Exception! ffmpeg history:\n{FfmpegGetError()}");
-				throw;
-			}
-
-			// have to do binary write!
-			//ffmpeg.StandardInput.BaseStream.Write(b, 0, b.Length);
+			var buf = ArrayPool<int>.Shared.Rent(_width * _height);
+			Array.Copy(video, 0, buf, 0, _width * _height);
+			Enqueue(new Job(buf, _width * _height, null));
 		}
 
 		public IDisposable AcquireVideoCodecToken(Config config)
@@ -403,15 +457,9 @@ namespace BizHawk.Client.EmuHawk
 				return;
 			}
 
-			try
-			{
-				_muxer.WriteAudioFrame(samples);
-			}
-			catch
-			{
-				_dialogParent.DialogController.ShowMessageBox($"Exception! ffmpeg history:\n{FfmpegGetError()}");
-				throw;
-			}
+			var buf = new short[samples.Length];
+			Array.Copy(samples, buf, samples.Length);
+			Enqueue(new Job(null, 0, buf));
 		}
 
 		/// <exception cref="ArgumentOutOfRangeException"><paramref name="bits"/> is not <c>16</c></exception>

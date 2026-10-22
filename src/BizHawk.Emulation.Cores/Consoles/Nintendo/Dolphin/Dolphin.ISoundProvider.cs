@@ -22,60 +22,70 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 		// fractional read position relative to the carry frame, in [0, RESAMPLE_STEP)
 		private double _resamplePos;
 
-		// stereo frame count of the last chunk with actual audio, used to size silence padding
-		// (44100 Hz at ~59.94 fps); nsamp is always whole stereo frames, i.e. an even sample count
-		private int _lastGoodNsamps = 736;
+		// cumulative sample-frame budget and total emitted, for exact per-frame counts;
+		// nsamp is always whole stereo frames, i.e. an even sample count
+		private double _sampCarry;
+		private int _emitted;
 
 		private void ProcessSound()
 		{
 			var sz = 0;
 			var data = _core.Dolphin_GetAudio(ref sz);
-			_nsamps = 0;
-			// sometimes 0 is returned, particularly on the first frame of the IPL boot
-			if (sz <= 0) return;
 
-			if (sz + 2 > _rawBuf.Length) _rawBuf = new short[sz + 2];
-			_rawBuf[0] = _carryL;
-			_rawBuf[1] = _carryR;
-			Marshal.Copy(data, _rawBuf, 2, sz);
-
-			var inFrames = sz / 2 + 1; // carry frame plus the new samples
-			var maxOut = (int)((inFrames - 1 - _resamplePos) / RESAMPLE_STEP) + 2;
-			if (maxOut * 2 > _sampleBuf.Length) _sampleBuf = new short[maxOut * 2];
-
-			var pos = _resamplePos;
 			var outFrames = 0;
-			while (pos < inFrames - 1)
+			// sometimes 0 is returned, particularly on the first frame of the IPL boot
+			if (sz > 0)
 			{
-				var i0 = (int)pos;
-				var frac = pos - i0;
-				for (var ch = 0; ch < 2; ch++)
+				if (sz + 2 > _rawBuf.Length) _rawBuf = new short[sz + 2];
+				_rawBuf[0] = _carryL;
+				_rawBuf[1] = _carryR;
+				Marshal.Copy(data, _rawBuf, 2, sz);
+
+				var inFrames = sz / 2 + 1; // carry frame plus the new samples
+				var maxOut = (int)((inFrames - 1 - _resamplePos) / RESAMPLE_STEP) + 2;
+				if (maxOut * 2 > _sampleBuf.Length) _sampleBuf = new short[maxOut * 2];
+
+				var pos = _resamplePos;
+				while (pos < inFrames - 1)
 				{
-					var v = _rawBuf[i0 * 2 + ch] * (1.0 - frac) + _rawBuf[(i0 + 1) * 2 + ch] * frac;
-					_sampleBuf[outFrames * 2 + ch] = (short)Math.Round(v);
+					var i0 = (int)pos;
+					var frac = pos - i0;
+					for (var ch = 0; ch < 2; ch++)
+					{
+						var v = _rawBuf[i0 * 2 + ch] * (1.0 - frac) + _rawBuf[(i0 + 1) * 2 + ch] * frac;
+						_sampleBuf[outFrames * 2 + ch] = (short)Math.Round(v);
+					}
+
+					outFrames++;
+					pos += RESAMPLE_STEP;
 				}
 
-				outFrames++;
-				pos += RESAMPLE_STEP;
+				_resamplePos = pos - (inFrames - 1);
+				_carryL = _rawBuf[(inFrames - 1) * 2];
+				_carryR = _rawBuf[(inFrames - 1) * 2 + 1];
 			}
 
-			_resamplePos = pos - (inFrames - 1);
-			_carryL = _rawBuf[(inFrames - 1) * 2];
-			_carryR = _rawBuf[(inFrames - 1) * 2 + 1];
-
-			if (outFrames == 0)
+			// the frontend paces A/V dumping off the sample count (VideoStretcher drops or dups video
+			// frames when a chunk deviates from the expected per-frame count), so emit exactly
+			// rate * fpsDen / fpsNum stereo frames per frame on a cumulative carry: pad short chunks
+			// with silence (the native mixer legitimately produces nothing on IPL boot / GPU lag
+			// frames) and trim the rare surplus frame
+			RefreshVsync();
+			_sampCarry += 44100.0 * _vsync.Den / _vsync.Num;
+			var want = (int)((long)Math.Round(_sampCarry) - _emitted);
+			if (want < 0) want = 0;
+			if (outFrames > want)
 			{
-				// the native mixer legitimately produces nothing on some frames (IPL boot, GPU lag);
-				// hand the frontend silence at the last known-good length instead of an empty chunk
-				outFrames = _lastGoodNsamps;
-				if (outFrames * 2 > _sampleBuf.Length) _sampleBuf = new short[outFrames * 2];
-				Array.Clear(_sampleBuf, 0, outFrames * 2);
+				outFrames = want;
 			}
-			else
+			else if (outFrames < want)
 			{
-				_lastGoodNsamps = outFrames;
+				if (want * 2 > _sampleBuf.Length) _sampleBuf = new short[want * 2];
+				Array.Clear(_sampleBuf, outFrames * 2, (want - outFrames) * 2);
+				outFrames = want;
 			}
 
+			_emitted += outFrames;
 			_nsamps = outFrames;
 		}
 

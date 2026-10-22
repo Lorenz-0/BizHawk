@@ -717,10 +717,13 @@ namespace BizHawk.Client.EmuHawk
 			public VideoCopy(IVideoProvider c)
 			{
 				int[] vb = c.GetVideoBuffer();
-				VideoBuffer = new byte[vb.Length * sizeof(int)];
+				// some cores (Dolphin) expose an oversized backing buffer; only the actual
+				// width*height pixels are valid, converting/gzipping the rest is wasted work
+				var len = System.Math.Min(vb.Length, c.BufferWidth * c.BufferHeight);
+				VideoBuffer = new byte[len * sizeof(int)];
 
 				// we have to switch RGB ordering here
-				for (int i = 0; i < vb.Length; i++)
+				for (int i = 0; i < len; i++)
 				{
 					VideoBuffer[i * 4 + 0] = (byte)(vb[i] >> 16);
 					VideoBuffer[i * 4 + 1] = (byte)(vb[i] >> 8);

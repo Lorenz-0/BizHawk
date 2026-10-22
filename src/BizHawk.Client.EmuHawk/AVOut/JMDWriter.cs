@@ -139,11 +139,14 @@ namespace BizHawk.Client.EmuHawk
 		/// </summary>
 		private class JmdFile
 		{
+			// a [ThreadStatic] field is only initialized on the thread that runs the static constructor
+			// (here: whichever thread opens the file), leaving every other thread (the file writing worker)
+			// with null, which implicitly converts to an empty span and throws on write; init per thread instead
 			[ThreadStatic]
-			private static readonly byte[] ScratchSpace;
+			private static byte[] ScratchSpace;
 
-			static JmdFile()
-				=> ScratchSpace = new byte[10];
+			private static byte[] GetScratchSpace()
+				=> ScratchSpace ??= new byte[10];
 
 			// current timestamp position
 			private ulong _timestampOff;
@@ -260,8 +263,9 @@ namespace BizHawk.Client.EmuHawk
 			/// </summary>
 			private void WriteBe16(ushort v)
 			{
-				BinaryPrimitives.WriteUInt16BigEndian(ScratchSpace, v);
-				_f.Write(ScratchSpace, offset: 0, count: sizeof(ushort));
+				var scratch = GetScratchSpace();
+				BinaryPrimitives.WriteUInt16BigEndian(scratch, v);
+				_f.Write(scratch, offset: 0, count: sizeof(ushort));
 			}
 
 			/// <summary>
@@ -269,8 +273,9 @@ namespace BizHawk.Client.EmuHawk
 			/// </summary>
 			private void WriteBe32(uint v)
 			{
-				BinaryPrimitives.WriteUInt32BigEndian(ScratchSpace, v);
-				_f.Write(ScratchSpace, offset: 0, count: sizeof(uint));
+				var scratch = GetScratchSpace();
+				BinaryPrimitives.WriteUInt32BigEndian(scratch, v);
+				_f.Write(scratch, offset: 0, count: sizeof(uint));
 			}
 
 			/// <summary>
@@ -278,8 +283,9 @@ namespace BizHawk.Client.EmuHawk
 			/// </summary>
 			private void WriteBe64(ulong v)
 			{
-				BinaryPrimitives.WriteUInt64BigEndian(ScratchSpace, v);
-				_f.Write(ScratchSpace, offset: 0, count: sizeof(ulong));
+				var scratch = GetScratchSpace();
+				BinaryPrimitives.WriteUInt64BigEndian(scratch, v);
+				_f.Write(scratch, offset: 0, count: sizeof(ulong));
 			}
 
 			/// <summary>
@@ -288,12 +294,13 @@ namespace BizHawk.Client.EmuHawk
 			/// </summary>
 			private void WriteVar(ulong v)
 			{
-				ScratchSpace.Fill<byte>(0);
+				var scratch = GetScratchSpace();
+				scratch.Fill<byte>(0);
 				int i = 0;
 				while (v > 0)
 				{
-					ScratchSpace[i] = unchecked((byte) (v & 0x7F));
-					if (i is 0) ScratchSpace[i] |= 0x80;
+					scratch[i] = unchecked((byte) (v & 0x7F));
+					if (i is 0) scratch[i] |= 0x80;
 					i++;
 					v >>= 7;
 				}
@@ -306,7 +313,7 @@ namespace BizHawk.Client.EmuHawk
 				{
 					for (; i > 0; i--)
 					{
-						_f.WriteByte(ScratchSpace[i - 1]);
+						_f.WriteByte(scratch[i - 1]);
 					}
 				}
 			}

@@ -22,6 +22,10 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 		// fractional read position relative to the carry frame, in [0, RESAMPLE_STEP)
 		private double _resamplePos;
 
+		// stereo frame count of the last chunk with actual audio, used to size silence padding
+		// (44100 Hz at ~59.94 fps); nsamp is always whole stereo frames, i.e. an even sample count
+		private int _lastGoodNsamps = 736;
+
 		private void ProcessSound()
 		{
 			var sz = 0;
@@ -58,6 +62,20 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 			_resamplePos = pos - (inFrames - 1);
 			_carryL = _rawBuf[(inFrames - 1) * 2];
 			_carryR = _rawBuf[(inFrames - 1) * 2 + 1];
+
+			if (outFrames == 0)
+			{
+				// the native mixer legitimately produces nothing on some frames (IPL boot, GPU lag);
+				// hand the frontend silence at the last known-good length instead of an empty chunk
+				outFrames = _lastGoodNsamps;
+				if (outFrames * 2 > _sampleBuf.Length) _sampleBuf = new short[outFrames * 2];
+				Array.Clear(_sampleBuf, 0, outFrames * 2);
+			}
+			else
+			{
+				_lastGoodNsamps = outFrames;
+			}
+
 			_nsamps = outFrames;
 		}
 

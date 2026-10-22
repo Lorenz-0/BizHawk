@@ -154,6 +154,20 @@ namespace BizHawk.Client.EmuHawk
 				//               If WaitForExit(time) returns true, this call waits for message pump to clear out events.
 				_ffmpeg.WaitForExit();
 			}
+			else
+			{
+				// ffmpeg wedged (stopped consuming the pipe, or stuck internally); a live process keeps the pipe
+				// handles open, so subsequent writes on a fresh segment could block forever - kill it instead
+				try
+				{
+					_ffmpeg.Kill();
+					_ffmpeg.WaitForExit(5000);
+				}
+				catch
+				{
+					// already gone or inaccessible; nothing more to do here
+				}
+			}
 			lock (_stderrLock)
 			{
 				_stderr = null;

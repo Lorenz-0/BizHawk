@@ -100,6 +100,10 @@ namespace BizHawk.Emulation.DiscSystem
 		//TODO - this is a very platform-specific thing. hashing the TOC may be faster and be just as effective. so, rename it appropriately
 		public string OldHash()
 		{
+			// the GameCube/Wii container formats can't be mounted, so there are no sectors to hash;
+			// cores which own the file (Dolphin) compute their own hash instead
+			if (disc is null) return "cannot hash this disc type";
+
 			var buffer = new byte[512 * 2352];
 			var dsr = new DiscSectorReader(disc);
 			// don't hash generated lead-in and lead-out tracks

@@ -9,6 +9,8 @@ namespace BizHawk.Emulation.Cores.Properties {
 		internal static readonly Lazy<byte[]> CPC_BASIC_1_0_ROM = new(() => ReadEmbeddedByteArray("CPC_BASIC_1.0.ROM.zst"));
 		internal static readonly Lazy<byte[]> CPC_BASIC_1_1_ROM = new(() => ReadEmbeddedByteArray("CPC_BASIC_1.1.ROM.zst"));
 		internal static readonly Lazy<byte[]> CPC_OS_6128_ROM = new(() => ReadEmbeddedByteArray("CPC_OS_6128.ROM.zst"));
+		internal static readonly Lazy<byte[]> DOLPHIN_GAME_SETTINGS = new(() => ReadEmbeddedByteArray("DolphinGameSettings.zip.zst"));
+		internal static readonly Lazy<byte[]> DOLPHIN_SYS_FOLDER = new(() => ReadEmbeddedByteArray("DolphinSys.zip.zst"));
 		internal static readonly Lazy<byte[]> DOSBOX_CONF_BASE = new(() => ReadEmbeddedByteArray("dosbox-x.base.conf"));
 		internal static readonly Lazy<byte[]> DOSBOX_CONF_1981_IBM_5150 = new(() => ReadEmbeddedByteArray("dosbox-x.1981.ibm_xt5150.conf"));
 		internal static readonly Lazy<byte[]> DOSBOX_CONF_1983_IBM_5160 = new(() => ReadEmbeddedByteArray("dosbox-x.1983.ibm_xt5160.conf"));

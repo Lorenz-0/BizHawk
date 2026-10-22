@@ -29,6 +29,16 @@ namespace BizHawk.Emulation.Cores
 		DiscType DiscType { get; }
 
 		string DiscName { get; set; }
+
+		/// <summary>
+		/// Absolute path of the disc image on disk.
+		/// </summary>
+		/// <remarks>
+		/// Needed by cores which do their own file IO rather than reading sectors out of <see cref="DiscData"/>,
+		/// e.g. Dolphin, which understands container formats (RVZ/WIA/GCZ/WBFS/…) that <c>DiscSystem</c> can't mount.
+		/// For such formats <see cref="DiscData"/> may be <see langword="null"/>, making this the only way to reach the medium.
+		/// </remarks>
+		string DiscPath { get; set; }
 	}
 
 	public class CoreLoadParameters<TSettings, TSyncS>

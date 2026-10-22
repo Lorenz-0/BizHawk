@@ -33,6 +33,7 @@ namespace BizHawk.Emulation.Common
 			[VSystemID.Raw.SGB] = "SGB",
 			[VSystemID.Raw.GBA] = "Gameboy Advance",
 			[VSystemID.Raw.GBC] = "Gameboy Color",
+			[VSystemID.Raw.GameCube] = "GameCube",
 			[VSystemID.Raw.GEN] = "Genesis",
 			[VSystemID.Raw.GG] = "Game Gear",
 			[VSystemID.Raw.GGL] = "Game Gear Link",
@@ -67,6 +68,7 @@ namespace BizHawk.Emulation.Common
 			[VSystemID.Raw.UZE] = "Uzebox",
 			[VSystemID.Raw.VB] = "Virtual Boy",
 			[VSystemID.Raw.VEC] = "Vectrex",
+			[VSystemID.Raw.Wii] = "Wii",
 			[VSystemID.Raw.WSWAN] = "WonderSwan",
 			[VSystemID.Raw.ZXSpectrum] = "ZX Spectrum",
 		};

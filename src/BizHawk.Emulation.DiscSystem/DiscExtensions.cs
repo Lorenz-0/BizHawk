@@ -35,7 +35,9 @@ namespace BizHawk.Emulation.DiscSystem
 
 			var disc = discMountJob.OUT_Disc;
 
-			var discType = new DiscIdentifier(disc).DetectDiscType();
+			// disc may legitimately be null: the GameCube/Wii container formats cannot be mounted,
+			// in which case they're identified from their own header and the requesting core does its own file IO
+			var discType = new DiscIdentifier(disc, path).DiscType;
 
 			if (type.HasValue && discType != type)
 			{

@@ -9,6 +9,7 @@ using BizHawk.Common.StringExtensions;
 using BizHawk.Emulation.Common;
 using BizHawk.Emulation.Cores;
 using BizHawk.Emulation.Cores.Libretro;
+using BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin;
 using BizHawk.Emulation.Cores.Nintendo.Sameboy;
 using BizHawk.Emulation.Cores.Nintendo.SNES;
 using BizHawk.Emulation.Cores.Sony.PSX;
@@ -24,6 +25,7 @@ namespace BizHawk.Client.Common
 			public Disc DiscData { get; set; }
 			public DiscType DiscType { get; set; }
 			public string DiscName { get; set; }
+			public string DiscPath { get; set; }
 		}
 		private class RomAsset : IRomAsset
 		{
@@ -236,12 +238,16 @@ namespace BizHawk.Client.Common
 			return true;
 		}
 
-		private GameInfo MakeGameFromDisc(Disc disc, string ext, string name, bool fastFailUnsupportedSystems = true)
+		private GameInfo MakeGameFromDisc(Disc disc, string path, string ext, string name, bool fastFailUnsupportedSystems = true)
 		{
 			// TODO - use more sophisticated IDer
-			var discType = new DiscIdentifier(disc).DetectDiscType();
-			var discHasher = new DiscHasher(disc);
-			var discHash = discHasher.CalculateBizHash(discType);
+			// disc may legitimately be null: the GameCube/Wii container formats can't be mounted,
+			// so they're identified from their own header instead of from disc sectors
+			var discType = new DiscIdentifier(disc, path).DiscType;
+			var discHash = discType is DiscType.GameCube or DiscType.Wii
+				// Dolphin owns these files (and understands containers DiscSystem can't read), so it hashes them itself
+				? Dolphin.QuickHashDisc(path)
+				: new DiscHasher(disc).CalculateBizHash(discType);
 
 			var game = Database.CheckDatabase(discHash);
 			if (game is not null) return game;
@@ -295,7 +301,7 @@ namespace BizHawk.Client.Common
 					NoCoreForSystem(VSystemID.Raw.Dreamcast);
 					break;
 				case DiscType.GameCube:
-					NoCoreForSystem(VSystemID.Raw.GameCube);
+					game.System = VSystemID.Raw.GameCube;
 					break;
 				case DiscType.NeoGeoCD:
 					NoCoreForSystem(VSystemID.Raw.NeoGeoCD);
@@ -307,7 +313,7 @@ namespace BizHawk.Client.Common
 					NoCoreForSystem(VSystemID.Raw.PS2);
 					break;
 				case DiscType.Wii:
-					NoCoreForSystem(VSystemID.Raw.Wii);
+					game.System = VSystemID.Raw.Wii;
 					break;
 
 				case DiscType.AudioDisc:
@@ -332,14 +338,18 @@ namespace BizHawk.Client.Common
 		private bool LoadDisc(string path, CoreComm nextComm, HawkFile file, string ext, string forcedCoreName, out IEmulator nextEmulator, out GameInfo game)
 		{
 			var disc = InstantiateDiscFor(path);
-			if (disc == null)
+			var discType = new DiscIdentifier(disc, path).DiscType;
+
+			// disc may legitimately be null for the GameCube/Wii container formats, which DiscSystem cannot mount
+			// (Dolphin does its own file IO), so only give up when the medium can't be identified at all
+			if (disc == null && discType == DiscType.UnknownFormat)
 			{
 				game = null;
 				nextEmulator = null;
 				return false;
 			}
 
-			game = MakeGameFromDisc(disc, ext, Path.GetFileNameWithoutExtension(file.Name));
+			game = MakeGameFromDisc(disc, path, ext, Path.GetFileNameWithoutExtension(file.Name));
 
 			var cip = new CoreInventoryParameters(this)
 			{
@@ -350,8 +360,9 @@ namespace BizHawk.Client.Common
 						new DiscAsset
 						{
 							DiscData = disc,
-							DiscType = new DiscIdentifier(disc).DetectDiscType(),
+							DiscType = discType,
 							DiscName = Path.GetFileNameWithoutExtension(path),
+							DiscPath = path,
 						},
 					},
 			};
@@ -372,18 +383,21 @@ namespace BizHawk.Client.Common
 				.Select(e => e.Path)
 				.Where(p => Disc.IsValidExtension(Path.GetExtension(p)))
 				.Select(p => (p, d: DiscExtensions.CreateAnyType(p, str => DoLoadErrorCallback(str, "???", LoadErrorType.DiscError))))
-				.Where(a => a.d != null)
+				.Select(a => (a.p, a.d, t: new DiscIdentifier(a.d, a.p).DiscType))
+				// an unmounted disc is still usable if it was identified from its container header (GameCube/Wii)
+				.Where(a => a.d != null || a.t != DiscType.UnknownFormat)
 				.Select(a => (IDiscAsset)new DiscAsset
 				{
 					DiscData = a.d,
-					DiscType = new DiscIdentifier(a.d).DetectDiscType(),
+					DiscType = a.t,
 					DiscName = Path.GetFileNameWithoutExtension(a.p),
+					DiscPath = a.p,
 				})
 				.ToList();
 			if (discs.Count == 0)
 				throw new InvalidOperationException("Couldn't load any contents of the M3U as discs");
 
-			game = MakeGameFromDisc(discs[0].DiscData, Path.GetExtension(m3u.Entries[0].Path), discs[0].DiscName);
+			game = MakeGameFromDisc(discs[0].DiscData, discs[0].DiscPath, Path.GetExtension(m3u.Entries[0].Path), discs[0].DiscName);
 			var cip = new CoreInventoryParameters(this)
 			{
 				Comm = nextComm,
@@ -724,12 +738,15 @@ namespace BizHawk.Client.Common
 					Discs = xmlGame.Assets
 						.Where(pfd => IsDiscForXML(system, pfd.Path))
 						.Select(pfd => (p: pfd.Path, d: DiscExtensions.CreateAnyType(pfd.Path, str => DoLoadErrorCallback(str, system, LoadErrorType.DiscError))))
-						.Where(a => a.d != null)
+						.Select(a => (a.p, a.d, t: new DiscIdentifier(a.d, a.p).DiscType))
+						// an unmounted disc is still usable if it was identified from its container header (GameCube/Wii)
+						.Where(a => a.d != null || a.t != DiscType.UnknownFormat)
 						.Select(IDiscAsset (a) => new DiscAsset
 						{
 							DiscData = a.d,
-							DiscType = new DiscIdentifier(a.d).DetectDiscType(),
+							DiscType = a.t,
 							DiscName = Path.GetFileNameWithoutExtension(a.p),
+							DiscPath = a.p,
 						})
 						.ToList(),
 				};
@@ -838,6 +855,7 @@ namespace BizHawk.Client.Common
 						game = Disc.IsValidExtension(file.Extension)
 							? MakeGameFromDisc(
 								InstantiateDiscFor(path),
+								path: path,
 								ext: file.Extension,
 								name: Path.GetFileNameWithoutExtension(file.Name),
 								fastFailUnsupportedSystems: false)
@@ -1053,6 +1071,12 @@ namespace BizHawk.Client.Common
 
 			public static readonly IReadOnlyCollection<string> GBA = new[] { "gba" };
 
+			/// <remarks>
+			/// <c>elf</c> is deliberately excluded: it's already claimed by <see cref="N3DS"/>,
+			/// and the two platforms can't be told apart from the extension alone.
+			/// </remarks>
+			public static readonly IReadOnlyCollection<string> GameCube = new[] { "gcm", "tgc", "iso", "ciso", "gcz", "wia", "rvz", "dol" };
+
 			public static readonly IReadOnlyCollection<string> GEN = new[] { "gen", "md", "smd", "32x" };
 
 			public static readonly IReadOnlyCollection<string> INTV = new[] { "int", "bin", "rom" };
@@ -1094,6 +1118,12 @@ namespace BizHawk.Client.Common
 			public static readonly IReadOnlyCollection<string> VB = new[] { "vb" };
 
 			public static readonly IReadOnlyCollection<string> VEC = new[] { "vec" };
+
+			/// <remarks>
+			/// <c>wad</c> is deliberately excluded: it's already claimed by <see cref="Doom"/>.
+			/// <c>elf</c> likewise belongs to <see cref="N3DS"/>.
+			/// </remarks>
+			public static readonly IReadOnlyCollection<string> Wii = new[] { "gcm", "iso", "ciso", "gcz", "wbfs", "wia", "rvz", "dol" };
 
 			public static readonly IReadOnlyCollection<string> WSWAN = new[] { "ws", "wsc", "pc2" };
 
@@ -1155,6 +1185,7 @@ namespace BizHawk.Client.Common
 			new FilesystemFilter(/*VSystemID.Raw.DOS*/"DOS", RomFileExtensions.DOS),
 			new FilesystemFilter(/*VSystemID.Raw.GB*/"Gameboy", RomFileExtensions.GB.Concat(new[] { "gbs" }).ToList(), addArchiveExts: true),
 			new FilesystemFilter(/*VSystemID.Raw.GBA*/"Gameboy Advance", RomFileExtensions.GBA, addArchiveExts: true),
+			new FilesystemFilter(/*VSystemID.Raw.GameCube*/"Nintendo GameCube", RomFileExtensions.GameCube),
 			new FilesystemFilter(/*VSystemID.Raw.GEN*/"Genesis", RomFileExtensions.GEN.Concat(FilesystemFilter.DiscExtensions).ToList(), addArchiveExts: true),
 			new FilesystemFilter(/*VSystemID.Raw.INTV*/"IntelliVision", RomFileExtensions.INTV, addArchiveExts: true),
 			new FilesystemFilter(/*VSystemID.Raw.Jaguar*/"Atari Jaguar", RomFileExtensions.Jaguar, addArchiveExts: true),
@@ -1176,6 +1207,7 @@ namespace BizHawk.Client.Common
 			new FilesystemFilter(/*VSystemID.Raw.UZE*/"Uzebox", RomFileExtensions.UZE),
 			new FilesystemFilter(/*VSystemID.Raw.VB*/"Virtual Boy", RomFileExtensions.VB, addArchiveExts: true),
 			new FilesystemFilter(/*VSystemID.Raw.VEC*/"Vectrex", RomFileExtensions.VEC),
+			new FilesystemFilter(/*VSystemID.Raw.Wii*/"Nintendo Wii", RomFileExtensions.Wii),
 			new FilesystemFilter(/*VSystemID.Raw.WSWAN*/"WonderSwan", RomFileExtensions.WSWAN, addArchiveExts: true),
 			new FilesystemFilter(/*VSystemID.Raw.ZXSpectrum*/"Sinclair ZX Spectrum", RomFileExtensions.ZXSpectrum.Concat(new[] { "csw", "wav" }).ToList(), addArchiveExts: true),
 			new FilesystemFilter("Music Files", Array.Empty<string>(), devBuildExtraExts: new[] { "psf", "minipsf", "sid", "nsf", "gbs" }),

@@ -348,6 +348,26 @@ namespace BizHawk.Emulation.Common
 			// GG
 			FirmwareAndOption("914AA165E3D879F060BE77870D345B60CFEB4EDE", 1024, "GG", "Majesco", "GG_majesco.gg", "GG BIOS (USA/Majesco)"); // https://www.smspower.org/Development/BIOSes#TMSSGameGearBIOS "majbios.gg"
 
+			// GameCube and Wii share these files; FirmwareID forbids '/', hence the underscore
+			// the IPL is only strictly required for GameCube when booting through the intro;
+			// Dolphin also reads the font ROMs out of it, and the DSP files only matter for DSP LLE
+			Firmware("GC_Wii", "IPL", "IPL ROM");
+			var gcIplNtsc10 = File("A1837968288253ED541F2B11440B68F5A9B33875", 2 * 1024 * 1024, "gc-ntsc-10.bin", "IPL ROM NTSC 1.0");
+			var gcIplNtsc11 = File("239EACD86527FF9A75AEB7282DA65797BAEEF010", 2 * 1024 * 1024, "gc-ntsc-11.bin", "IPL ROM NTSC 1.1");
+			var gcIplNtsc12 = File("EF9194AB4804AA0AA8540D846CAF291B28331165", 2 * 1024 * 1024, "gc-ntsc-12.bin", "IPL ROM NTSC 1.2");
+			var gcIplPal10 = File("F27C63E5394E2FD1606F70DF004C4FC2D6027700", 2 * 1024 * 1024, "gc-pal-10.bin", "IPL ROM PAL 1.0");
+			var gcIplPal11 = File("F3CD0C7C61CBCEFA85E7DE3AFF4CFA50BC508714", 2 * 1024 * 1024, "gc-pal-11.bin", "IPL ROM PAL 1.1");
+			var gcIplPal12 = File("80B8744FF5E43585392F55546BD03A673D11EF5F", 2 * 1024 * 1024, "gc-pal-12.bin", "IPL ROM PAL 1.2");
+			Option("GC_Wii", "IPL", in gcIplNtsc10);
+			Option("GC_Wii", "IPL", in gcIplNtsc11);
+			Option("GC_Wii", "IPL", in gcIplNtsc12, FirmwareOptionStatus.Ideal);
+			Option("GC_Wii", "IPL", in gcIplPal10);
+			Option("GC_Wii", "IPL", in gcIplPal11);
+			Option("GC_Wii", "IPL", in gcIplPal12);
+
+			FirmwareAndOption("C116D867BA001DCD6BF6D399FF4BF38D340F556C", 4 * 1024, "GC_Wii", "DSP_COEF", "dsp_coef.bin", "DSP COEF");
+			FirmwareAndOption("3C6CC6E04FDD0B2A392D7A6ED769455444846BE7", 8 * 1024, "GC_Wii", "DSP_IROM", "dsp_rom.bin", "DSP IROM");
+
 			// INTV
 			FirmwareAndOption("5A65B922B562CB1F57DAB51B73151283F0E20C7A", 8192, "INTV", "EROM", "INTV_EROM.bin", "Executive Rom");
 			FirmwareAndOption("F9608BB4AD1CFE3640D02844C7AD8E0BCD974917", 2048, "INTV", "GROM", "INTV_GROM.bin", "Graphics Rom");

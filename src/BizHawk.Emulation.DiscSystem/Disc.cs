@@ -120,7 +120,13 @@ namespace BizHawk.Emulation.DiscSystem
 		internal Disc()
 		{}
 
+		/// <remarks>
+		/// Includes the GameCube/Wii container formats. DiscSystem cannot mount those, so
+		/// <c>DiscMountJob</c> yields a <see langword="null"/> <see cref="Disc"/> for them and the requesting
+		/// core does its own file IO, but they still need to reach the disc loading path for identification.
+		/// </remarks>
 		public static bool IsValidExtension(string extension)
-			=> extension.ToLowerInvariant() is ".ccd" or ".cdi" or ".chd" or ".cue" or ".iso" or ".toc" or ".mds" or ".nrg";
+			=> extension.ToLowerInvariant() is ".ccd" or ".cdi" or ".chd" or ".cue" or ".iso" or ".toc" or ".mds" or ".nrg"
+				or ".gcm" or ".tgc" or ".ciso" or ".gcz" or ".wia" or ".rvz" or ".wbfs";
 	}
 }

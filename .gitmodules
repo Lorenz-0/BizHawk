@@ -65,6 +65,13 @@
 	path = encore/encore
 	url = https://github.com/CasualPokePlayer/encore.git
 	branch = headless
+# Provenance for the prebuilt Dolphin natives shipped in Assets/dll.
+# NOTE: this entry has no gitlink yet, so `git submodule update --init` ignores it;
+# register it with `git submodule add -b biz` before the source is expected to build in-tree.
+[submodule "libdolphin"]
+	path = libdolphin
+	url = https://github.com/CasualPokePlayer/dolphin
+	branch = biz
 [submodule "ExternalProjects/SDL2/SDL"]
 	path = ExternalProjects/SDL2/SDL
 	url = https://github.com/libsdl-org/SDL.git

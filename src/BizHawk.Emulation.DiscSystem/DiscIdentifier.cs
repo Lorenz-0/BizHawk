@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 
@@ -121,7 +122,12 @@ namespace BizHawk.Emulation.DiscSystem
 
 	public class DiscIdentifier
 	{
-		public DiscIdentifier(Disc disc)
+		/// <param name="disc">a mounted disc, or <see langword="null"/> for a container format DiscSystem can't mount</param>
+		/// <param name="path">
+		/// path to the medium on disk. Required when <paramref name="disc"/> is <see langword="null"/>,
+		/// as the container is then identified from its own header instead of from disc sectors.
+		/// </param>
+		public DiscIdentifier(Disc disc, string path = null)
 		{
 			_disc = disc;
 			_dsr = new(disc)
@@ -131,11 +137,103 @@ namespace BizHawk.Emulation.DiscSystem
 				// so let's be careful here.. we're just trying to ID things, not be robust
 				Policy = { ThrowExceptions2048 = false },
 			};
+
+			DiscType = disc is null ? DetectSpecialDiscType(path) : DetectDiscType();
 		}
 
 		private readonly Disc _disc;
 		private readonly DiscSectorReader _dsr;
 		private readonly Dictionary<int, byte[]> _sectorCache = new();
+
+		/// <summary>the disc type determined at construction</summary>
+		public DiscType DiscType { get; }
+
+		/// <summary>
+		/// Identifies container formats which DiscSystem cannot mount, and so which yield no <see cref="Disc"/>.
+		/// Dolphin handles all file IO for these itself; we only need enough of the header to tell GC from Wii.
+		/// </summary>
+		/// <remarks>
+		/// <c>.dol</c> and <c>.elf</c> are deliberately not detected here: they carry no platform marker,
+		/// so the user has to pick GameCube vs Wii on the Choose Platform screen.
+		/// </remarks>
+		private static DiscType DetectSpecialDiscType(string path)
+		{
+			if (string.IsNullOrEmpty(path)) return DiscType.UnknownFormat;
+
+			try
+			{
+				using var fs = new FileStream(path, FileMode.Open, FileAccess.Read);
+				using var reader = new BinaryReader(fs);
+
+				uint ReadBeU32()
+				{
+					var be32 = reader.ReadBytes(4);
+					if (be32.Length < 4) throw new EndOfStreamException();
+					return (uint) ((be32[0] << 24) | (be32[1] << 16) | (be32[2] << 8) | be32[3]);
+				}
+
+				switch (Path.GetExtension(path).ToLowerInvariant())
+				{
+					case ".ciso":
+					{
+						// "CISO"
+						if (reader.ReadUInt32() != 0x4F534943) return DiscType.UnknownFormat;
+
+						// the disc header begins at 0x8000, and the magic is 20 bytes into it
+						_ = reader.ReadBytes(0x8000 + 20);
+						return ReadBeU32() switch
+						{
+							0x5D1C9EA3 => DiscType.Wii,
+							0xC2339F3D => DiscType.GameCube,
+							_ => DiscType.UnknownFormat,
+						};
+					}
+					case ".tgc":
+						// only GameCube used the TGC container
+						return reader.ReadUInt32() != 0xA2380FAE ? DiscType.UnknownFormat : DiscType.GameCube;
+					case ".gcz":
+						if (reader.ReadUInt32() != 0xB10BC001) return DiscType.UnknownFormat;
+						return ReadBeU32() switch
+						{
+							0 => DiscType.GameCube,
+							1 => DiscType.Wii,
+							_ => DiscType.UnknownFormat,
+						};
+					case ".wia":
+						// "WIA\x1"
+						if (reader.ReadUInt32() != 0x01414957) return DiscType.UnknownFormat;
+
+						_ = reader.ReadBytes(0x44);
+						return ReadBeU32() switch
+						{
+							1 => DiscType.GameCube,
+							2 => DiscType.Wii,
+							_ => DiscType.UnknownFormat,
+						};
+					case ".rvz":
+						// "RVZ\x1"
+						if (reader.ReadUInt32() != 0x015A5652) return DiscType.UnknownFormat;
+
+						_ = reader.ReadBytes(0x44);
+						return ReadBeU32() switch
+						{
+							1 => DiscType.GameCube,
+							2 => DiscType.Wii,
+							_ => DiscType.UnknownFormat,
+						};
+					case ".wbfs":
+						// "WBFS"; only Wii used this
+						return reader.ReadUInt32() != 0x53464257 ? DiscType.UnknownFormat : DiscType.Wii;
+					default:
+						return DiscType.UnknownFormat;
+				}
+			}
+			catch (Exception)
+			{
+				// a truncated or unreadable container is simply not one we can identify
+				return DiscType.UnknownFormat;
+			}
+		}
 
 		/// <summary>
 		/// Attempts to determine the type of the disc.
@@ -143,6 +241,10 @@ namespace BizHawk.Emulation.DiscSystem
 		/// </summary>
 		public DiscType DetectDiscType()
 		{
+			// a null disc is now legitimate (an unmountable GameCube/Wii container); there are no sectors to read.
+			// callers wanting that case identified should use the DiscType property, which falls back to the container header.
+			if (_disc is null) return DiscType.UnknownFormat;
+
 			// Jaguar CDs are infact audio CDs, so they get bumped to the top of detection here
 			if (DetectJaguarCD())
 				return DiscType.JaguarCD;

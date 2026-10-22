@@ -201,6 +201,7 @@ namespace BizHawk.Emulation.DiscSystem
 					LoadCue(dir, File.ReadAllText(IN_FromPath));
 					break;
 				case ".iso":
+				case ".gcm": // a GameCube disc image is just raw 2048 byte sectors, same as an .iso
 					// make a fake .cue file to represent this .iso and mount that
 					// however... to save many users from a stupid mistake, check if the size is NOT a multiple of 2048 (but IS a multiple of 2352) and in that case consider it a mode2 disc
 					//TODO try it both ways and check the disc type to use whichever one succeeds in identifying a disc type

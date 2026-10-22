@@ -175,6 +175,9 @@ namespace BizHawk.Emulation.Common
 			["Next Disk"] = '>',
 			["Previous Disk"] = '<',
 
+			// Dolphin swaps between the two discs of a double-disc GC/Wii game
+			["Swap Disc"] = '~',
+
 			["F1"] = '1',
 			["F2"] = '2',
 			["F3"] = '3',

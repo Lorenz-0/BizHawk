@@ -32,6 +32,12 @@ namespace BizHawk.Bizware.Input
 		private int RawInputBufferSize;
 		private readonly int RawInputBufferDataOffset;
 
+		// some cores (e.g. Dolphin via DirectInput) make their own RAWINPUT registrations,
+		// and only the last registration per device class is honored process-wide,
+		// so periodically re-register ours to avoid losing keyboard and mouse input
+		private const int RAWINPUT_REREGISTRATION_INTERVAL_MS = 500;
+		private int _lastRawInputRegistrationTick;
+
 		private static readonly WNDPROC _wndProc = WndProc;
 
 		private static readonly Lazy<IntPtr> _rawInputWindowAtom = new(() =>
@@ -202,6 +208,21 @@ namespace BizHawk.Bizware.Input
 			}
 		}
 
+		private static unsafe bool RegisterRawInputDevicesForWindow(IntPtr window)
+		{
+			var rid = stackalloc RAWINPUTDEVICE[2];
+			rid[0].usUsagePage = RAWINPUTDEVICE.HidUsagePage.GENERIC;
+			rid[0].usUsage = RAWINPUTDEVICE.HidUsageId.GENERIC_KEYBOARD;
+			rid[0].dwFlags = RAWINPUTDEVICE.RIDEV.INPUTSINK;
+			rid[0].hwndTarget = window;
+			rid[1].usUsagePage = RAWINPUTDEVICE.HidUsagePage.GENERIC;
+			rid[1].usUsage = RAWINPUTDEVICE.HidUsageId.GENERIC_MOUSE;
+			rid[1].dwFlags = RAWINPUTDEVICE.RIDEV.INPUTSINK;
+			rid[1].hwndTarget = window;
+
+			return RegisterRawInputDevices(rid, 2, sizeof(RAWINPUTDEVICE));
+		}
+
 		private static IntPtr CreateRawInputWindow()
 		{
 			const int WS_CHILD = 0x40000000;
@@ -224,23 +245,10 @@ namespace BizHawk.Bizware.Input
 				throw new InvalidOperationException("Failed to create RAWINPUT window");
 			}
 
-			unsafe
+			if (!RegisterRawInputDevicesForWindow(window))
 			{
-				var rid = stackalloc RAWINPUTDEVICE[2];
-				rid[0].usUsagePage = RAWINPUTDEVICE.HidUsagePage.GENERIC;
-				rid[0].usUsage = RAWINPUTDEVICE.HidUsageId.GENERIC_KEYBOARD;
-				rid[0].dwFlags = RAWINPUTDEVICE.RIDEV.INPUTSINK;
-				rid[0].hwndTarget = window;
-				rid[1].usUsagePage = RAWINPUTDEVICE.HidUsagePage.GENERIC;
-				rid[1].usUsage = RAWINPUTDEVICE.HidUsageId.GENERIC_MOUSE;
-				rid[1].dwFlags = RAWINPUTDEVICE.RIDEV.INPUTSINK;
-				rid[1].hwndTarget = window;
-
-				if (!RegisterRawInputDevices(rid, 2, sizeof(RAWINPUTDEVICE)))
-				{
-					DestroyWindow(window);
-					throw new InvalidOperationException("Failed to register RAWINPUTDEVICE");
-				}
+				DestroyWindow(window);
+				throw new InvalidOperationException("Failed to register RAWINPUTDEVICE");
 			}
 
 			return window;
@@ -310,6 +318,14 @@ namespace BizHawk.Bizware.Input
 					RawInputWindow = CreateRawInputWindow();
 					var handle = GCHandle.Alloc(this, GCHandleType.Normal);
 					SetWindowLongPtrW(RawInputWindow, GWLP_USERDATA, GCHandle.ToIntPtr(handle));
+					_lastRawInputRegistrationTick = Environment.TickCount;
+				}
+
+				if (Environment.TickCount - _lastRawInputRegistrationTick >= RAWINPUT_REREGISTRATION_INTERVAL_MS)
+				{
+					// re-register in case another registration (e.g. a core's DirectInput usage) replaced ours
+					_lastRawInputRegistrationTick = Environment.TickCount;
+					RegisterRawInputDevicesForWindow(RawInputWindow); // best effort, retried next interval on failure
 				}
 
 				_handleAltKbLayouts = handleAltKbLayouts;

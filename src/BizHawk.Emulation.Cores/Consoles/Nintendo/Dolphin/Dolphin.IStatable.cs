@@ -45,8 +45,6 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 
 			_ = reader.Read(_stateBuf, 0, len);
 			_core.Dolphin_LoadState(_stateBuf, len, compressed);
-			ResetSoundFifo();
-			RefreshVsync();
 
 			// other variables; must mirror SaveStateBinary exactly
 			IsLagFrame = reader.ReadBoolean();

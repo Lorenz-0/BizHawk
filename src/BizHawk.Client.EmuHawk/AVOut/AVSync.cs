@@ -12,14 +12,6 @@ namespace BizHawk.Client.EmuHawk
 
 		private long _soundRemainder; // audio timekeeping for video dumping
 
-		public override void SetMovieParameters(int fpsNum, int fpsDen)
-		{
-			if (VSet && FpsNum == fpsNum && FpsDen == fpsDen) return;
-
-			_soundRemainder = 0;
-			base.SetMovieParameters(fpsNum, fpsDen);
-		}
-
 		/// <exception cref="InvalidOperationException">
 		/// <paramref name="asyncSoundProvider"/>'s mode is not <see cref="SyncSoundMode.Async"/>, or
 		/// A/V parameters haven't been set (need to call <see cref="AVStretcher.SetAudioParameters"/> and <see cref="AVStretcher.SetMovieParameters"/>)
@@ -66,15 +58,6 @@ namespace BizHawk.Client.EmuHawk
 		private long _threshOne;
 		private long _threshMore;
 		private long _threshTotal;
-
-		public override void SetMovieParameters(int fpsNum, int fpsDen)
-		{
-			if (VSet && FpsNum == fpsNum && FpsDen == fpsDen) return;
-
-			_pSet = false;
-			_exAudioNum = 0;
-			base.SetMovieParameters(fpsNum, fpsDen);
-		}
 
 		private void VerifyParams()
 		{
@@ -159,9 +142,13 @@ namespace BizHawk.Client.EmuHawk
 		protected int Bits;
 		protected bool ASet;
 
+		/// <exception cref="InvalidOperationException">already set</exception>
 		public new virtual void SetMovieParameters(int fpsNum, int fpsDen)
 		{
-			if (VSet && FpsNum == fpsNum && FpsDen == fpsDen) return;
+			if (VSet)
+			{
+				throw new InvalidOperationException();
+			}
 
 			VSet = true;
 			FpsNum = fpsNum;

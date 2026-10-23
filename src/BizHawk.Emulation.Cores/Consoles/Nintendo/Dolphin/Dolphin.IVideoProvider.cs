@@ -18,17 +18,56 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 		public int BufferHeight => _height;
 
 		/// <remarks>
-		/// the native side reports 0/1 until the VI timing registers are first written (earliest boot frames),
-		/// and the frontend divides by these values (A/V dumping, sound pacing), so hold the last known-good
-		/// ratio instead of passing the zeros through
+		/// the native side reports 0/1 until the VI timing registers are first written, and
+		/// <c>VideoInterface::Preset()</c> initializes <c>m_Clock = 1</c> (54 MHz) alongside 27 MHz interlaced
+		/// line counts (reporting 120000/1001 ~ 119.88 Hz before the game configures VI); normalize that 2x
+		/// preset ratio and hold the last valid PAL/NTSC refresh ratio so A/V dumping and sound pacing never
+		/// latch onto 0 or 119.88 Hz
 		/// </remarks>
-		private (int Num, int Den) _vsync = (60, 1);
+		private (int Num, int Den) _vsync = (60000, 1001);
+
+		private static int Gcd(int a, int b)
+		{
+			while (b != 0)
+			{
+				(a, b) = (b, a % b);
+			}
+
+			return a;
+		}
 
 		private void RefreshVsync()
 		{
 			var num = _core.Dolphin_GetVSyncNumerator();
 			var den = _core.Dolphin_GetVSyncDenominator();
-			if (num != 0 && den != 0) _vsync = (num, den);
+			if (num <= 0 || den <= 0) return;
+
+			var fps = (double) num / den;
+			if (fps is > 90.0 and < 130.0)
+			{
+				if ((num & 1) == 0)
+				{
+					num >>= 1;
+				}
+				else
+				{
+					if (den > int.MaxValue / 2) return;
+					den <<= 1;
+				}
+
+				fps *= 0.5;
+			}
+
+			if (fps is < 20.0 or > 75.0) return;
+
+			var gcd = Gcd(num, den);
+			if (gcd > 1)
+			{
+				num /= gcd;
+				den /= gcd;
+			}
+
+			_vsync = (num, den);
 		}
 
 		public int VsyncNumerator

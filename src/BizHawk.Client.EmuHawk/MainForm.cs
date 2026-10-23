@@ -1688,6 +1688,7 @@ namespace BizHawk.Client.EmuHawk
 
 		// AVI/WAV state
 		private IVideoWriter _currAviWriter;
+		private (int Num, int Den) _avVsync;
 
 		// Sound refactor TODO: we can enforce async mode here with a property that gets/sets this but does an async check
 		private ISoundProvider _aviSoundInputAsync; // Note: This sound provider must be in async mode!
@@ -3210,7 +3211,8 @@ namespace BizHawk.Client.EmuHawk
 #endif
 
 				aw = Config.VideoWriterAudioSyncEffective ? new VideoStretcher(aw) : new AudioStretcher(aw);
-				aw.SetMovieParameters(Emulator.VsyncNumerator(), Emulator.VsyncDenominator());
+				_avVsync = (Emulator.VsyncNumerator(), Emulator.VsyncDenominator());
+				aw.SetMovieParameters(_avVsync.Num, _avVsync.Den);
 				(IVideoProvider output, Action dispose) = GetCaptureProvider();
 				aw.SetVideoParameters(output.BufferWidth, output.BufferHeight);
 				if (dispose != null) dispose();
@@ -3503,6 +3505,19 @@ namespace BizHawk.Client.EmuHawk
 				try
 				{
 					_currAviWriter.SetFrame(Emulator.Frame);
+
+					var vsyncNum = Emulator.VsyncNumerator();
+					var vsyncDen = Emulator.VsyncDenominator();
+					if ((vsyncNum, vsyncDen) != _avVsync && vsyncNum > 0 && vsyncDen > 0)
+					{
+						var prevFps = _avVsync.Den > 0 ? (double) _avVsync.Num / _avVsync.Den : 0.0;
+						var curFps = (double) vsyncNum / vsyncDen;
+						if (prevFps <= 0.0 || Math.Abs(curFps - prevFps) > prevFps * 0.01)
+						{
+							_avVsync = (vsyncNum, vsyncDen);
+							_currAviWriter.SetMovieParameters(vsyncNum, vsyncDen);
+						}
+					}
 
 					(IVideoProvider output, dispose) = GetCaptureProvider();
 

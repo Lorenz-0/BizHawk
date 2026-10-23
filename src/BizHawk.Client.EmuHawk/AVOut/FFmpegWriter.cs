@@ -441,8 +441,17 @@ namespace BizHawk.Client.EmuHawk
 
 		public void SetMovieParameters(int fpsNum, int fpsDen)
 		{
+			if (_fpsnum == fpsNum && _fpsden == fpsDen) return;
+
 			_fpsnum = fpsNum;
 			_fpsden = fpsDen;
+
+			if (_ffmpeg != null)
+			{
+				CloseFileSegment();
+				_segment++;
+				OpenFileSegment();
+			}
 		}
 
 		public void SetVideoParameters(int width, int height)

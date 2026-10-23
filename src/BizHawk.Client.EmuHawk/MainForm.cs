@@ -2834,6 +2834,8 @@ namespace BizHawk.Client.EmuHawk
 
 		public void FrameAdvance(bool discardApiHawkSurfaces)
 		{
+			StallDiag.Beat();
+			StallDiag.Note("main frame enter");
 			PressFrameAdvance = true;
 			StepRunLoop_Core(true);
 			if (discardApiHawkSurfaces)
@@ -3009,7 +3011,9 @@ namespace BizHawk.Client.EmuHawk
 				}
 
 				bool render = !_throttle.skipNextFrame || _currAviWriter?.UsesVideo is true || atTurboSeekEnd;
+				StallDiag.Note("native FrameAdvance enter");
 				bool newFrame = Emulator.FrameAdvance(InputManager.ControllerOutput, render, renderSound);
+				StallDiag.Note("native FrameAdvance exit");
 
 				MovieSession.HandleFrameAfter(ToolBypassingMovieEndAction is not null);
 
@@ -3401,6 +3405,7 @@ namespace BizHawk.Client.EmuHawk
 
 		private void AvFrameAdvance()
 		{
+			StallDiag.Note("AvFrameAdvance enter");
 			// is this the best time to handle this? or deeper inside?
 			if (_argParser._currAviWriterFrameList?.Contains(Emulator.Frame) != false)
 			{
@@ -3435,6 +3440,8 @@ namespace BizHawk.Client.EmuHawk
 					if (dispose != null) dispose();
 				}
 			}
+
+			StallDiag.Note("AvFrameAdvance exit");
 
 			if (_autoDumpLength > 0) //TODO this is probably not necessary because of the call to StopAv --yoshi
 			{

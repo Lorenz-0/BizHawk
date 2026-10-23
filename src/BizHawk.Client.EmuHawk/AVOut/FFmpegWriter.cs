@@ -117,11 +117,23 @@ namespace BizHawk.Client.EmuHawk
 
 			_ffmpeg.BeginErrorReadLine();
 
+			StallDiag.SetExtraState(() =>
+			{
+				try
+				{
+					return $"ffmpeg: exited={_ffmpeg.HasExited} queued={_jobs.Count} pumpAlive={_pump is not null && _pump.IsAlive} pumpError={_pumpError?.Message ?? "none"}";
+				}
+				catch (Exception e)
+				{
+					return $"ffmpeg state unavailable: {e.Message}";
+				}
+			});
 			_muxer = new NutMuxer(_width, _height, _fpsnum, _fpsden, _sampleRate, _channels, new WedgeGuardStream(_ffmpeg.StandardInput.BaseStream, this));
 
 			_jobs = new BlockingCollection<Job>(boundedCapacity: 8);
 			_pump = new Thread(PumpLoop) { IsBackground = true, Name = "FFmpegWriter pump" };
 			_pump.Start();
+			StallDiag.Note($"ffmpeg segment open done {_width}x{_height}");
 		}
 
 		/// <summary>
@@ -203,15 +215,18 @@ namespace BizHawk.Client.EmuHawk
 			{
 				if (_wedged) throw new IOException("ffmpeg pipe already wedged");
 
+				StallDiag.Note($"pipe write enter {count}");
 				var ar = _inner.BeginWrite(buffer, offset, count, null, null);
 				if (!ar.AsyncWaitHandle.WaitOne(PipeWriteTimeoutMs))
 				{
+					StallDiag.Note("pipe write TIMEOUT, killing ffmpeg");
 					_wedged = true;
 					_owner.KillWedgedFfmpeg();
 					throw new IOException($"ffmpeg did not consume a pipe write for {PipeWriteTimeoutMs} ms; process killed");
 				}
 
 				_inner.EndWrite(ar);
+				StallDiag.Note("pipe write exit");
 			}
 
 			// the pipe's lifetime belongs to the ffmpeg process object, not to us
@@ -240,6 +255,7 @@ namespace BizHawk.Client.EmuHawk
 			{
 				foreach (var j in _jobs.GetConsumingEnumerable())
 				{
+					StallDiag.Note(j.Video is not null ? $"pump video {j.VideoLen}" : $"pump audio {j.Audio.Length}");
 					if (j.Video is not null)
 					{
 						_muxer.WriteVideoFrame(j.Video.AsSpan(0, j.VideoLen));
@@ -253,6 +269,7 @@ namespace BizHawk.Client.EmuHawk
 			}
 			catch (Exception e)
 			{
+				StallDiag.Note($"pump died: {e}");
 				_pumpError = e;
 				_jobs.CompleteAdding();
 			}
@@ -263,6 +280,7 @@ namespace BizHawk.Client.EmuHawk
 			if (_pumpError is not null) throw new Exception("ffmpeg pump died", _pumpError);
 			if (!_jobs.TryAdd(j, TimeSpan.FromSeconds(10)))
 			{
+				StallDiag.Note($"Enqueue TIMEOUT queued={_jobs.Count} exited={_ffmpeg.HasExited}");
 				throw new TimeoutException($"ffmpeg not consuming: queued={_jobs.Count} exited={_ffmpeg.HasExited}\n{FfmpegGetError()}");
 			}
 		}
@@ -273,8 +291,10 @@ namespace BizHawk.Client.EmuHawk
 		private void CloseFileSegment()
 		{
 			// let the pump finish everything it already accepted before the muxer writes EOR
+			StallDiag.Note("CloseFileSegment enter, joining pump");
 			_jobs?.CompleteAdding();
 			_pump?.Join();
+			StallDiag.Note("pump joined");
 			_pump = null;
 			_jobs = null;
 			// pump failures already surfaced on the calling thread via Enqueue; don't rethrow here,
@@ -294,6 +314,7 @@ namespace BizHawk.Client.EmuHawk
 			try
 			{
 				_ffmpeg.StandardInput.Close();
+				StallDiag.Note("stdin closed");
 			}
 			catch
 			{
@@ -302,8 +323,10 @@ namespace BizHawk.Client.EmuHawk
 
 			// bounded, short waits: this runs on the UI thread during segment splits, so a wedged
 			// process must be killed promptly rather than waited out
+			StallDiag.Note("waiting for ffmpeg exit (2s)");
 			if (!_ffmpeg.WaitForExit(2000))
 			{
+				StallDiag.Note("ffmpeg did not exit in 2s, killing");
 				try
 				{
 					_ffmpeg.Kill();

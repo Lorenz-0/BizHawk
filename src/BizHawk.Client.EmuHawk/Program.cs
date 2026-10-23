@@ -107,6 +107,7 @@ namespace BizHawk.Client.EmuHawk
 		[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
 		private static int SubMain(string[] args)
 		{
+			StallDiag.Init();
 			// this check has to be done VERY early.  i stepped through a debug build with wrong .dll versions purposely used,
 			// and there was a TypeLoadException before the first line of SubMain was reached (some static ColorType init?)
 			var thisAsmVer = ReflectionCache.AsmVersion;

@@ -82,14 +82,6 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 			p->AnalogB = (byte) (((p->Buttons & LibDolphin.PadButtons.B) != 0) ? 0xFF : 0);
 
 			p->IsConnected = true;
-
-			if (_doSwapDisc || _doReset)
-			{
-				_core.Dolphin_SpecialInputs(_doSwapDisc, _doReset);
-				_didSwapDisc |= _doSwapDisc;
-				_doSwapDisc = false;
-				_doReset = false;
-			}
 		}
 
 		private readonly LibDolphin.WiiPadCallback _wiipadcb;

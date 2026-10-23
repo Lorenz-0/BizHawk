@@ -107,6 +107,17 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 			{
 				_runner.Run(() =>
 				{
+					// special inputs used to be fired from the native input callback, i.e. re-entering
+					// libdolphin from inside the emulated CPU thread (a native-lock deadlock candidate);
+					// fire them here instead, on the step thread and outside native code
+					if (_doSwapDisc || _doReset)
+					{
+						_core.Dolphin_SpecialInputs(_doSwapDisc, _doReset);
+						_didSwapDisc |= _doSwapDisc;
+						_doSwapDisc = false;
+						_doReset = false;
+					}
+
 					var gpuLagged = _core.Dolphin_FrameStep(render, ref _width, ref _height);
 
 					// by default we lag whenever the GPU presented no new frame;

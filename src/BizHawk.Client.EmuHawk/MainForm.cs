@@ -3012,7 +3012,24 @@ namespace BizHawk.Client.EmuHawk
 
 				bool render = !_throttle.skipNextFrame || _currAviWriter?.UsesVideo is true || atTurboSeekEnd;
 				StallDiag.Note("native FrameAdvance enter");
-				bool newFrame = Emulator.FrameAdvance(InputManager.ControllerOutput, render, renderSound);
+				bool newFrame;
+				try
+				{
+					newFrame = Emulator.FrameAdvance(InputManager.ControllerOutput, render, renderSound);
+				}
+				catch (TimeoutException e)
+				{
+					StallDiag.Note($"core wedged: {e.Message}");
+					HandleWedgedCore();
+					return;
+				}
+				catch (InvalidOperationException e) when (e.Message.Contains("wedged"))
+				{
+					StallDiag.Note($"core wedged (repeat): {e.Message}");
+					HandleWedgedCore();
+					return;
+				}
+
 				StallDiag.Note("native FrameAdvance exit");
 
 				MovieSession.HandleFrameAfter(ToolBypassingMovieEndAction is not null);
@@ -3360,6 +3377,35 @@ namespace BizHawk.Client.EmuHawk
 					return (_currentVideoProvider, null);
 				}
 			}
+		}
+
+		/// <summary>
+		/// the Dolphin core's native step thread wedged (libdolphin's FrameStep spin-waits on the emulated
+		/// CPU thread with no timeout, and that wait cannot be interrupted). the core is unusable from here
+		/// on: save any recording up to the last complete frame, park emulation, and ask for a reload -
+		/// instead of leaking the exception to the top-level handler and leaving the client half-alive
+		/// </summary>
+		private void HandleWedgedCore()
+		{
+			try
+			{
+				AbortAv();
+			}
+			catch (Exception e)
+			{
+				StallDiag.Note($"abort av after core wedge failed: {e.Message}");
+			}
+
+			try
+			{
+				PauseEmulator();
+			}
+			catch (Exception e)
+			{
+				StallDiag.Note($"pause after core wedge failed: {e.Message}");
+			}
+
+			ShowMessageBox(owner: null, "The emulation core stopped responding inside native code and cannot recover.\n\nAny recording in progress was stopped and saved up to the last complete frame.\nReload the game (or restart BizHawk) to continue.");
 		}
 
 		private void AbortAv()

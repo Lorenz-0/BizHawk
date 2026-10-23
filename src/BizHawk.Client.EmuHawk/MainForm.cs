@@ -2846,6 +2846,8 @@ namespace BizHawk.Client.EmuHawk
 
 		private void StepRunLoop_Core(bool force = false)
 		{
+			// a wedged core can never step again; stepping anyway would just re-hit the wedge path
+			if (_coreDead) return;
 			var runFrame = false;
 			var currentTimestamp = Stopwatch.GetTimestamp();
 
@@ -3379,6 +3381,8 @@ namespace BizHawk.Client.EmuHawk
 			}
 		}
 
+		private bool _coreDead;
+
 		/// <summary>
 		/// the Dolphin core's native step thread wedged (libdolphin's FrameStep spin-waits on the emulated
 		/// CPU thread with no timeout, and that wait cannot be interrupted). the core is unusable from here
@@ -3387,6 +3391,12 @@ namespace BizHawk.Client.EmuHawk
 		/// </summary>
 		private void HandleWedgedCore()
 		{
+			_coreDead = true;
+
+			// capture the OS thread table at the moment of the wedge: the spinning step thread shows up
+			// as a Running thread with large CPU time, everything it blocks shows as Wait
+			StallDiag.DumpThreads("core wedge thread table");
+
 			try
 			{
 				AbortAv();

@@ -46,14 +46,64 @@ namespace BizHawk.Client.EmuHawk
 		/// <summary>registers extra state (e.g. the ffmpeg process) to include in a stall report</summary>
 		public static void SetExtraState(Func<string> provider) => _extraState = provider;
 
-		/// <summary>breadcrumb from the calling thread</summary>
+		/// <summary>breadcrumb from the calling thread; never throws, never kills the caller</summary>
 		public static void Note(string stage)
+			=> SafeLine($"{DateTime.UtcNow:O} tid={Thread.CurrentThread.ManagedThreadId} {stage}");
+
+		private static void SafeLine(string line)
 		{
-			var log = _log;
-			if (log is null) return;
-			lock (LogLock)
+			try
 			{
-				log.WriteLine($"{DateTime.UtcNow:O} tid={Thread.CurrentThread.ManagedThreadId} {stage}");
+				lock (LogLock)
+			{
+					_log?.WriteLine(line);
+				}
+			}
+			catch
+			{
+				// a disk/antivirus hiccup must never kill a diagnostic path
+			}
+		}
+
+		/// <summary>
+		/// writes the OS thread table right now (ids, states, wait reasons, CPU times), plus any
+		/// registered extra state. call this at the moment of a wedge: unlike the watchdog it needs
+		/// no heartbeat silence and no waiting, so the evidence lands even if the watchdog is gone
+		/// </summary>
+		public static void DumpThreads(string header)
+		{
+			SafeLine($"{DateTime.UtcNow:O} tid={Thread.CurrentThread.ManagedThreadId} {header}");
+			try
+			{
+				SafeLine(_extraState?.Invoke() ?? "no extra state registered");
+			}
+			catch (Exception e)
+			{
+				SafeLine($"extra state failed: {e.Message}");
+			}
+
+			try
+			{
+				using var proc = Process.GetCurrentProcess();
+				foreach (ProcessThread th in proc.Threads)
+				{
+					string wait;
+					try
+					{
+						// WaitReason throws unless the thread is actually in the Wait state
+						wait = th.ThreadState == System.Diagnostics.ThreadState.Wait ? th.WaitReason.ToString() : "-";
+					}
+					catch
+					{
+						wait = "?";
+					}
+
+					SafeLine($"thread id={th.Id} state={th.ThreadState} wait={wait} cpu={th.TotalProcessorTime}");
+				}
+			}
+			catch (Exception e)
+			{
+				SafeLine($"thread dump failed: {e.Message}");
 			}
 		}
 
@@ -69,42 +119,25 @@ namespace BizHawk.Client.EmuHawk
 		{
 			while (true)
 			{
-				Thread.Sleep(2000);
-				if (_log is null) continue;
-				var delta = unchecked(Environment.TickCount - Volatile.Read(ref _lastBeat));
-				if (delta <= 6000) continue;
-				if (Interlocked.Exchange(ref _stallReported, 1) == 1) continue;
-				Report(delta);
+				try
+				{
+					Thread.Sleep(2000);
+					if (_log is null) continue;
+					var delta = unchecked(Environment.TickCount - Volatile.Read(ref _lastBeat));
+					if (delta <= 6000) continue;
+					if (Interlocked.Exchange(ref _stallReported, 1) == 1) continue;
+					Report(delta);
+				}
+				catch
+				{
+					// the watchdog must never die: a failed report costs one episode, not the watchdog
+				}
 			}
 		}
 
 		private static void Report(int deltaMs)
 		{
-			lock (LogLock)
-			{
-				_log.WriteLine($"{DateTime.UtcNow:O} tid={Thread.CurrentThread.ManagedThreadId} STALL DETECTED: main loop silent for {deltaMs} ms");
-				try
-				{
-					_log.WriteLine(_extraState?.Invoke() ?? "no extra state registered");
-				}
-				catch (Exception e)
-				{
-					_log.WriteLine($"extra state failed: {e.Message}");
-				}
-
-				try
-				{
-					using var proc = Process.GetCurrentProcess();
-					foreach (ProcessThread th in proc.Threads)
-					{
-						_log.WriteLine($"thread id={th.Id} state={th.ThreadState} wait={th.WaitReason} cpu={th.TotalProcessorTime}");
-					}
-				}
-				catch (Exception e)
-				{
-					_log.WriteLine($"thread dump failed: {e.Message}");
-				}
-			}
+			DumpThreads($"STALL DETECTED: main loop silent for {deltaMs} ms");
 
 			// offer a JIT debugger attach from this healthy thread so real (incl. native) stacks become
 			// available even though the UI thread is frozen; opt-in via env var

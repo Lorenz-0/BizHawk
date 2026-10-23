@@ -93,7 +93,9 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 				if (hThread == IntPtr.Zero) return;
 				try
 				{
-					SuspendThread(hThread);
+					// SuspendThread reports (DWORD)-1 on failure; if the suspend didn't take, the step
+					// thread simply keeps spinning, which is exactly the pre-existing behavior
+					if (SuspendThread(hThread) == uint.MaxValue) return;
 				}
 				finally
 				{

@@ -238,7 +238,7 @@ namespace BizHawk.Client.EmuHawk
 		/// <summary>
 		/// one unit of work for the pump thread; exactly one of Video/Audio is set
 		/// </summary>
-		private sealed record Job(int[] Video, int VideoLen, short[] Audio);
+		private sealed record class Job(int[] Video, int VideoLen, short[] Audio);
 
 		private BlockingCollection<Job> _jobs;
 		private Thread _pump;

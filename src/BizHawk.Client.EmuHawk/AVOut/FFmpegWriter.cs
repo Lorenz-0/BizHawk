@@ -289,28 +289,38 @@ namespace BizHawk.Client.EmuHawk
 			{
 				// pipe already dead (wedged ffmpeg was killed); nothing left to flush
 			}
-			//ffmpeg.StandardInput.Close();
-
-			// how long should we wait here?
-			if (_ffmpeg.WaitForExit(20000))
+			// give ffmpeg a real EOF on stdin: EOR packets alone left it reading the pipe forever,
+			// which is what burned the full exit timeout on the UI thread during segment splits
+			try
 			{
-				// Known MS bug: WaitForExit(time) waits for the process to exit but doesn't wait for event handling to finish.
-				//               If WaitForExit(time) returns true, this call waits for message pump to clear out events.
-				_ffmpeg.WaitForExit();
+				_ffmpeg.StandardInput.Close();
 			}
-			else
+			catch
 			{
-				// ffmpeg wedged (stopped consuming the pipe, or stuck internally); a live process keeps the pipe
-				// handles open, so subsequent writes on a fresh segment could block forever - kill it instead
+				// already closed or gone
+			}
+
+			// bounded, short waits: this runs on the UI thread during segment splits, so a wedged
+			// process must be killed promptly rather than waited out
+			if (!_ffmpeg.WaitForExit(2000))
+			{
 				try
 				{
 					_ffmpeg.Kill();
-					_ffmpeg.WaitForExit(5000);
 				}
 				catch
 				{
-					// already gone or inaccessible; nothing more to do here
+					// already gone or inaccessible
 				}
+
+				_ffmpeg.WaitForExit(2000);
+			}
+
+			if (_ffmpeg.HasExited)
+			{
+				// Known MS bug: WaitForExit(time) waits for the process to exit but doesn't wait for event
+				//               handling to finish; this call (process confirmed exited) flushes the events
+				_ffmpeg.WaitForExit();
 			}
 			lock (_stderrLock)
 			{

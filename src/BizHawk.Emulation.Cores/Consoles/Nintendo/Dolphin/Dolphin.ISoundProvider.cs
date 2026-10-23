@@ -6,10 +6,12 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 {
 	public partial class Dolphin : ISoundProvider
 	{
-		// the native mixer produces 48 kHz stereo, but modern BizHawk's sound pipeline
-		// (SoundOutputProvider, the A/V writers) is hardwired to 44.1 kHz, so resample
-		// here; 44100/48000 reduces to exactly 147/160
-		private const double RESAMPLE_STEP = 160.0 / 147.0;
+		// input frames consumed per output frame. the native library exposes no sample-rate
+		// export, and the rate is not even constant (Wii boot screens mix at 32 kHz, games at
+		// 48 kHz), so a fixed 48->44.1 step pitch-shifted the boot audio; estimate the input rate
+		// from the samples per frame we actually receive times the vsync rate, and derive the step
+		private double _resampleStep = 48000.0 / 44100.0;
+		private double _rateEst;
 
 		// native 48 kHz staging buffer, with room for one carry frame at the front
 		private short[] _rawBuf = new short[1024 * 2];
@@ -32,17 +34,28 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 			var sz = 0;
 			var data = _core.Dolphin_GetAudio(ref sz);
 
+			RefreshVsync();
+
 			var outFrames = 0;
 			// sometimes 0 is returned, particularly on the first frame of the IPL boot
 			if (sz > 0)
 			{
+				// rate estimate: samples this frame times frames per second; zero chunks (GPU lag)
+				// and insane values are ignored so they cannot poison the average
+				var inst = (sz / 2.0) * (_vsync.Num / (double)_vsync.Den);
+				if (inst >= 4000 && inst <= 192000)
+				{
+					_rateEst = _rateEst == 0 ? inst : _rateEst + (inst - _rateEst) * 0.1;
+					_resampleStep = _rateEst / 44100.0;
+				}
+
 				if (sz + 2 > _rawBuf.Length) _rawBuf = new short[sz + 2];
 				_rawBuf[0] = _carryL;
 				_rawBuf[1] = _carryR;
 				Marshal.Copy(data, _rawBuf, 2, sz);
 
 				var inFrames = sz / 2 + 1; // carry frame plus the new samples
-				var maxOut = (int)((inFrames - 1 - _resamplePos) / RESAMPLE_STEP) + 2;
+				var maxOut = (int)((inFrames - 1 - _resamplePos) / _resampleStep) + 2;
 				if (maxOut * 2 > _sampleBuf.Length) _sampleBuf = new short[maxOut * 2];
 
 				var pos = _resamplePos;
@@ -57,7 +70,7 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 					}
 
 					outFrames++;
-					pos += RESAMPLE_STEP;
+					pos += _resampleStep;
 				}
 
 				_resamplePos = pos - (inFrames - 1);
@@ -70,7 +83,6 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 			// rate * fpsDen / fpsNum stereo frames per frame on a cumulative carry: pad short chunks
 			// with silence (the native mixer legitimately produces nothing on IPL boot / GPU lag
 			// frames) and trim the rare surplus frame
-			RefreshVsync();
 			_sampCarry += 44100.0 * _vsync.Den / _vsync.Num;
 			var want = (int)((long)Math.Round(_sampCarry) - _emitted);
 			if (want < 0) want = 0;

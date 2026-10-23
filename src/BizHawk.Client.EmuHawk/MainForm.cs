@@ -2156,6 +2156,7 @@ namespace BizHawk.Client.EmuHawk
 		{
 			_currAviWriter?.CloseFile();
 			_currAviWriter = null;
+			MovieSession.IsAvDumpActive = false;
 		}
 
 		private DateTime _lastMessageCheck = DateTime.MinValue;
@@ -3284,6 +3285,7 @@ namespace BizHawk.Client.EmuHawk
 
 				// commit the avi writing last, in case there were any errors earlier
 				_currAviWriter = aw;
+				MovieSession.IsAvDumpActive = true;
 				AddOnScreenMessage("A/V capture started");
 				AVStatusLabel.Image = Properties.Resources.Avi;
 				AVStatusLabel.ToolTipText = "A/V capture in progress";
@@ -3455,6 +3457,7 @@ namespace BizHawk.Client.EmuHawk
 		{
 			if (_currAviWriter == null)
 			{
+				MovieSession.IsAvDumpActive = false;
 				_dumpProxy = null;
 				RewireSound();
 				return;
@@ -3462,6 +3465,7 @@ namespace BizHawk.Client.EmuHawk
 
 			_currAviWriter.Dispose();
 			_currAviWriter = null;
+			MovieSession.IsAvDumpActive = false;
 			AddOnScreenMessage("A/V capture aborted");
 			AVStatusLabel.Image = Properties.Resources.Blank;
 			AVStatusLabel.ToolTipText = "";
@@ -3475,6 +3479,7 @@ namespace BizHawk.Client.EmuHawk
 		{
 			if (_currAviWriter == null)
 			{
+				MovieSession.IsAvDumpActive = false;
 				_dumpProxy = null;
 				RewireSound();
 				return;
@@ -3483,6 +3488,7 @@ namespace BizHawk.Client.EmuHawk
 			_currAviWriter.CloseFile();
 			_currAviWriter.Dispose();
 			_currAviWriter = null;
+			MovieSession.IsAvDumpActive = false;
 			AddOnScreenMessage("A/V capture stopped");
 			AVStatusLabel.Image = Properties.Resources.Blank;
 			AVStatusLabel.ToolTipText = "";

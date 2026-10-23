@@ -53,6 +53,7 @@ namespace BizHawk.Client.Common
 
 		public IMovie Movie { get; private set; }
 		public bool ReadOnly { get; set; } = true;
+		public bool IsAvDumpActive { get; set; }
 		public bool NewMovieQueued => _queuedMovie != null;
 		public string QueuedSyncSettings => _queuedMovie.SyncSettingsJson;
 

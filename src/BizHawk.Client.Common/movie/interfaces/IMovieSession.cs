@@ -10,6 +10,9 @@ namespace BizHawk.Client.Common
 		IMovie Movie { get; }
 		bool ReadOnly { get; set; }
 
+		/// <summary>Whether an A/V dump is active; TAS should skip greenzone state captures while dumping.</summary>
+		bool IsAvDumpActive { get; set; }
+
 		/// <summary>
 		/// Gets a value indicating whether or not a new movie is queued for loading
 		/// </summary>

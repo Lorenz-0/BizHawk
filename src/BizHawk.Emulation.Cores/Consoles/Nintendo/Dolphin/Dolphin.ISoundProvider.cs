@@ -15,8 +15,12 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 
 		// native 48 kHz staging buffer, with room for one carry frame at the front
 		private short[] _rawBuf = new short[1024 * 2];
-		// resampled 44.1 kHz output buffer (returned oversized, consumers must use nsamp)
+		// resampled 44.1 kHz output buffer (returned oversized, consumers must use nsamp);
+		// the fill happens on the core step thread, so GetSamplesSync swaps to a spare buffer and the
+		// consumer never reads the array being filled
 		private short[] _sampleBuf = new short[1024 * 2];
+		private short[] _spareBuf = new short[1024 * 2];
+		private readonly object _soundLock = new();
 		private int _nsamps;
 
 		// last input frame, kept so interpolation stays phase-continuous across chunks
@@ -30,6 +34,11 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 		private int _emitted;
 
 		private void ProcessSound()
+		{
+			lock (_soundLock) ProcessSoundLocked();
+		}
+
+		private void ProcessSoundLocked()
 		{
 			var sz = 0;
 			var data = _core.Dolphin_GetAudio(ref sz);
@@ -107,7 +116,10 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 
 		public void DiscardSamples()
 		{
-			_nsamps = 0;
+			lock (_soundLock)
+			{
+				_nsamps = 0;
+			}
 		}
 
 		public void GetSamplesAsync(short[] samples)
@@ -117,9 +129,13 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 
 		public void GetSamplesSync(out short[] samples, out int nsamp)
 		{
-			samples = _sampleBuf;
-			nsamp = _nsamps;
-			DiscardSamples();
+			lock (_soundLock)
+			{
+				samples = _sampleBuf;
+				(_sampleBuf, _spareBuf) = (_spareBuf, _sampleBuf);
+				nsamp = _nsamps;
+				_nsamps = 0;
+			}
 		}
 
 		public void SetSyncMode(SyncSoundMode mode)

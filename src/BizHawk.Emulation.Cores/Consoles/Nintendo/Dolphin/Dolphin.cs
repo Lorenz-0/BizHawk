@@ -42,6 +42,8 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 
 		private Thread _hostThread;
 
+		private int _hostThreadId;
+
 		/// <summary>whether two discs were loaded, i.e. whether the "Swap Disc" button exists</summary>
 		private readonly bool _multiDisc;
 
@@ -49,6 +51,8 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 
 		private void ExecuteHostThread(string gamePath, string secondDiscPath)
 		{
+			if (!OSTailoredCode.IsUnixHost) _hostThreadId = unchecked((int) GetCurrentThreadId());
+
 			var args = new List<string>
 			{
 				"BizHawk",
@@ -60,6 +64,7 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 			if (secondDiscPath is not null) args.Add($"--exec={secondDiscPath}");
 
 			ApplyNativeSettings(args);
+			ApplyNativeOverrides(args);
 			_core.Dolphin_Main(args.Count, args.ToArray());
 		}
 
@@ -70,6 +75,34 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 		/// </remarks>
 		private const string USER_DIR = "DolphinUserFolder";
 		private const string SYS_DIR = "Sys";
+
+		/// <summary>
+		/// Power-user experimentation channel: extra native config overrides from an optional
+		/// <c>dolphin-native-overrides.txt</c> in the working directory (same convention as
+		/// <see cref="USER_DIR"/>), one <c>Section.Category.Key=Value</c> per line; <c>#</c> and
+		/// <c>;</c> start comments. Applied after the settings-derived config, so overrides win.
+		/// These affect emulation (e.g. <c>Dolphin.Core.GFXBackend=Vulkan</c> to test a different
+		/// video backend) - use at your own risk.
+		/// </summary>
+		private static void ApplyNativeOverrides(List<string> args)
+		{
+			try
+			{
+				if (!File.Exists(NATIVE_OVERRIDES_FILE)) return;
+				foreach (var line in File.ReadAllLines(NATIVE_OVERRIDES_FILE))
+				{
+					var trimmed = line.Trim();
+					if (trimmed.Length == 0 || trimmed[0] is '#' or ';') continue;
+					args.Add($"--config={trimmed}");
+				}
+			}
+			catch
+			{
+				// an unreadable overrides file must never prevent boot
+			}
+		}
+
+		private const string NATIVE_OVERRIDES_FILE = "dolphin-native-overrides.txt";
 
 		private static void ExtractEmbeddedZip(Lazy<byte[]> resource, string destDir)
 		{

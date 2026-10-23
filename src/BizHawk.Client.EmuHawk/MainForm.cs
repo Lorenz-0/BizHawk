@@ -31,6 +31,7 @@ using BizHawk.Emulation.Cores.Computers.AppleII;
 using BizHawk.Emulation.Cores.Computers.Commodore64;
 using BizHawk.Emulation.Cores.Computers.DOS;
 using BizHawk.Emulation.Cores.Consoles.Nintendo.QuickNES;
+using DolphinCore = BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin.Dolphin;
 using BizHawk.Emulation.Cores.Consoles.SNK;
 using BizHawk.Emulation.Cores.Nintendo.GBA;
 using BizHawk.Emulation.Cores.Nintendo.NES;
@@ -3393,6 +3394,13 @@ namespace BizHawk.Client.EmuHawk
 		{
 			_coreDead = true;
 
+			var dolphin = Emulator as DolphinCore;
+			if (dolphin is not null)
+			{
+				// log which OS threads are ours so the table below can be read unambiguously
+				StallDiag.Note($"wedge thread ids: native host tid={dolphin.NativeHostThreadId}, core step runner tid={dolphin.RunnerThreadId}");
+			}
+
 			// capture the OS thread table at the moment of the wedge: the spinning step thread shows up
 			// as a Running thread with large CPU time, everything it blocks shows as Wait
 			StallDiag.DumpThreads("core wedge thread table");
@@ -3415,7 +3423,32 @@ namespace BizHawk.Client.EmuHawk
 				StallDiag.Note($"pause after core wedge failed: {e.Message}");
 			}
 
-			ShowMessageBox(owner: null, "The emulation core stopped responding inside native code and cannot recover.\n\nAny recording in progress was stopped and saved up to the last complete frame.\nReload the game (or restart BizHawk) to continue.");
+			// try to tear the wedged native core down from the outside (freeze the spinning step thread,
+			// ask libdolphin to stop, wait bounded for its host thread to exit). The outcome discriminates
+			// the two wedge flavors: a CPU thread executing JIT acknowledges the power-down (teardown
+			// completes and the game can be reloaded in this process), one blocked inside a driver/fence
+			// wait does not (BizHawk must be restarted)
+			var killed = false;
+			if (dolphin is not null)
+			{
+				try
+				{
+					killed = dolphin.TryKillWedgedCore(5000);
+				}
+				catch (Exception e)
+				{
+					StallDiag.Note($"wedge kill threw: {e.Message}");
+				}
+
+				StallDiag.Note(killed
+					? "wedge kill: native core torn down, host thread exited; the game can be reloaded in this EmuHawk process"
+					: "wedge kill: FAILED, native teardown did not complete within 5 s (emulated CPU thread blocked inside native/driver code, ignoring the power-down request); EmuHawk must be restarted");
+				StallDiag.DumpThreads("thread table after wedge kill");
+			}
+
+			ShowMessageBox(owner: null, killed
+				? "The emulation core stopped responding inside native code.\n\nIt was force-stopped, and any recording in progress was saved up to the last complete frame.\nYou can continue by reloading the game (File > Open ROM, or Recent Roms) - EmuHawk itself does NOT need to be restarted."
+				: "The emulation core stopped responding inside native code and could not be force-stopped.\n\nAny recording in progress was saved up to the last complete frame.\nPlease restart BizHawk to continue.");
 		}
 
 		private void AbortAv()
@@ -3735,6 +3768,7 @@ namespace BizHawk.Client.EmuHawk
 				{
 					Emulator.Dispose();
 					Emulator = loader.LoadedEmulator;
+					_coreDead = false; // a fresh core supersedes a wedged one (the reload-after-wedge recovery path)
 					Game = loader.Game;
 					var currentCoreName = Emulator.Attributes().CoreName;
 					if (!Config.RecentCores.Contains(currentCoreName))

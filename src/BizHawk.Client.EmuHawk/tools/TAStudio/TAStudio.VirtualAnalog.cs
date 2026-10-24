@@ -78,11 +78,24 @@ namespace BizHawk.Client.EmuHawk
 			}
 		}
 
+		private static string AxisHeaderText(VirtualAnalogStick stick, string axisName)
+		{
+			if (stick.DisplayName is null) return axisName;
+			string axis = axisName == stick.XAxisName ? "X" : "Y";
+			return $"{stick.DisplayName}{stick.DirectionSeparator}{axis}";
+		}
+
 		private void SetVirtualAnalogColumnsOnRoll(InputRoll roll)
 		{
 			RefreshVirtualAnalogColumns();
 			foreach (VirtualAnalogStick stick in ControllerType.VirtualAnalogSticks)
 			{
+				foreach (string axisName in new[] { stick.XAxisName, stick.YAxisName })
+				{
+					RollColumn? axisColumn = roll.AllColumns.FirstOrDefault(column => column.Name == axisName);
+					if (axisColumn is not null) axisColumn.Text = AxisHeaderText(stick, axisName);
+				}
+
 				int yAxisIndex = roll.AllColumns.FindIndex(existing => existing.Name == stick.YAxisName);
 				int insertIndex = yAxisIndex < 0 ? -1 : yAxisIndex + 1;
 				foreach (VirtualAnalogStickDirection direction in Enum.GetValues(typeof(VirtualAnalogStickDirection)).Cast<VirtualAnalogStickDirection>())

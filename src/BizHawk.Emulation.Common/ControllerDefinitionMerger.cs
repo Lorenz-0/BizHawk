@@ -51,6 +51,29 @@ namespace BizHawk.Emulation.Common
 					buttonAxisRemaps[k] = r;
 				}
 
+				foreach (VirtualAnalogStick stick in def.VirtualAnalogSticks)
+				{
+					if (!buttonAxisRemaps.TryGetValue(stick.XAxisName, out string remappedX)
+						|| !buttonAxisRemaps.TryGetValue(stick.YAxisName, out string remappedY))
+					{
+						continue;
+					}
+
+					int player = ControllerDefinition.PlayerNumber(remappedX);
+					int firstSpace = stick.Name.IndexOf(' ');
+					bool hasPlayerPrefix = firstSpace > 0
+						&& (char.IsDigit(stick.Name[0]) || stick.Name[0] == 'P' && ControllerDefinition.PlayerNumber(stick.Name) > 0);
+					string remappedName = hasPlayerPrefix
+						? $"P{player}{stick.Name[firstSpace..]}"
+						: $"P{player} {stick.Name}";
+					ret.VirtualAnalogSticks.Add(stick with
+					{
+						Name = remappedName,
+						XAxisName = remappedX,
+						YAxisName = remappedY,
+					});
+				}
+
 				plr = playerNext;
 				unmergers.Add(new ControlDefUnMerger(buttonAxisRemaps));
 			}

@@ -62,6 +62,7 @@ namespace BizHawk.Emulation.Common
 		{
 			BoolButtons.AddRange(copyFrom.BoolButtons);
 			foreach (var kvp in copyFrom.Axes) Axes.Add(kvp);
+			VirtualAnalogSticks.AddRange(copyFrom.VirtualAnalogSticks);
 			HapticsChannels.AddRange(copyFrom.HapticsChannels);
 			CategoryLabels = copyFrom.CategoryLabels;
 			_mnemonicsCache = copyFrom._mnemonicsCache;
@@ -82,6 +83,22 @@ namespace BizHawk.Emulation.Common
 		}
 
 		public readonly AxisDict Axes = new AxisDict();
+
+		private IList<VirtualAnalogStick> _virtualAnalogSticks = new List<VirtualAnalogStick>();
+
+		/// <summary>
+		/// Optional UI metadata for presenting analog sticks as virtual directional controls.
+		/// These descriptions do not add controls to <see cref="BoolButtons"/> or <see cref="Axes"/>.
+		/// </summary>
+		public IList<VirtualAnalogStick> VirtualAnalogSticks
+		{
+			get => _virtualAnalogSticks;
+			set
+			{
+				AssertMutable();
+				_virtualAnalogSticks = value;
+			}
+		}
 
 		/// <summary>Contains names of virtual haptic feedback channels, e.g. <c>{ "P1 Mono" }</c>, <c>{ "P2 Left", "P2 Right" }</c>.</summary>
 		public IList<string> HapticsChannels { get; private set; } = new List<string>();
@@ -138,6 +155,7 @@ namespace BizHawk.Emulation.Common
 		{
 			BoolButtons = BoolButtons.ToImmutableList();
 			Axes.MakeImmutable();
+			VirtualAnalogSticks = VirtualAnalogSticks.ToImmutableList();
 			HapticsChannels = HapticsChannels.ToImmutableList();
 			CategoryLabels = CategoryLabels.ToImmutableDictionary();
 			_mutable = false;
@@ -192,6 +210,14 @@ namespace BizHawk.Emulation.Common
 				if (!merged.Axes.ContainsKey(axis.Key))
 				{
 					merged.AddAxis(axis.Key, axis.Value.Range, axis.Value.Neutral, axis.Value.IsReversed, axis.Value.Constraint);
+				}
+			}
+
+			foreach (VirtualAnalogStick stick in def1.VirtualAnalogSticks.Concat(def2.VirtualAnalogSticks).Distinct())
+			{
+				if (merged.Axes.ContainsKey(stick.XAxisName) && merged.Axes.ContainsKey(stick.YAxisName))
+				{
+					merged.VirtualAnalogSticks.Add(stick);
 				}
 			}
 

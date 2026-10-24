@@ -67,6 +67,8 @@ namespace BizHawk.Emulation.Cores
 
 			static AxisSpec MakeTriggerSpec() => new(0.RangeTo(255), 0);
 
+			var sticks = DolphinStickDefinitions.GameCubeSticks(controller);
+
 			return new PadSchema
 			{
 				Size = new Size(500, 290),
@@ -86,13 +88,13 @@ namespace BizHawk.Emulation.Cores
 					new ButtonSchema(112, 62, controller, "Start", "S"),
 					new ButtonSchema(90, 62, controller, "Z"),
 
-					new AnalogSchema(3, 120, $"P{controller} Main Stick X")
+					new AnalogSchema(3, 120, sticks[0].XAxisName)
 					{
 						Spec = MakeSpec(),
 						SecondarySpec = MakeSpec(),
 					},
 
-					new AnalogSchema(260, 120, $"P{controller} C Stick X")
+					new AnalogSchema(260, 120, sticks[1].XAxisName)
 					{
 						Spec = MakeSpec(),
 						SecondarySpec = MakeSpec(),

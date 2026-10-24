@@ -520,6 +520,7 @@ namespace BizHawk.Client.EmuHawk
 				});
 			}
 			roll.AllColumns.AddRange(columns);
+			SetVirtualAnalogColumnsOnRoll(roll);
 
 			foreach (var column in GetDefaultHiddenColums(roll))
 			{
@@ -788,6 +789,7 @@ namespace BizHawk.Client.EmuHawk
 						RemoveAllRolls();
 						InputRoll roll = _activeInputRoll = MakeInputRoll();
 						roll.LoadColumns(inputRollSettings.Columns);
+						SetVirtualAnalogColumnsOnRoll(roll);
 						roll.HorizontalOrientation = _movieSettings.HorizontalOrientation = inputRollSettings.HorizontalOrientation;
 						roll.LagFramesToHide = _movieSettings.LagFramesToHide = inputRollSettings.LagFramesToHide;
 						roll.HideWasLagFrames = _movieSettings.HideWasLagFrames = inputRollSettings.HideWasLagFrames;

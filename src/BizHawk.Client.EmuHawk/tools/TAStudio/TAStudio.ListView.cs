@@ -344,6 +344,7 @@ namespace BizHawk.Client.EmuHawk
 			{
 				InputRoll roll = MakeInputRoll();
 				roll.AllColumns.AddRange(cols);
+				SetVirtualAnalogColumnsOnRoll(roll);
 				UpdateColumnWidths(roll);
 			}
 
@@ -627,6 +628,12 @@ namespace BizHawk.Client.EmuHawk
 					offsetX = sender.HorizontalOrientation ? 2 : 7;
 					text = FrameToStringPadded(index);
 				}
+				else if (TryGetVirtualAnalogColumn(columnName, out VirtualAnalogColumn virtualColumn))
+				{
+					text = index < CurrentTasMovie.InputLogLength && IsVirtualAnalogDirectionPressed(index, virtualColumn)
+						? virtualColumn.Glyph
+						: "";
+				}
 				else
 				{
 					// Display typed float value (string "-" can't be parsed, so CurrentTasMovie.DisplayValue can't return it)
@@ -673,7 +680,20 @@ namespace BizHawk.Client.EmuHawk
 				{
 					var buttonName = roll.CurrentCell.Column!.Name;
 
-					if (ControllerType.BoolButtons.Contains(buttonName))
+					if (TryGetVirtualAnalogColumn(buttonName, out VirtualAnalogColumn virtualColumn))
+					{
+						int[] selection = GetSelection().ToArray();
+						bool allPressed = selection.Length != 0
+							&& selection.All(index => index < CurrentTasMovie.FrameCount && IsVirtualAnalogDirectionPressed(index, virtualColumn));
+						bool setPressed = !allPressed;
+						CurrentTasMovie.ChangeLog.BeginNewBatch($"{(setPressed ? "Set" : "Unset")} {buttonName} on {selection.Length} frames");
+						CurrentTasMovie.SingleInvalidation(() =>
+						{
+							foreach (int index in selection) SetVirtualAnalogDirection(index, buttonName, setPressed);
+						});
+						CurrentTasMovie.ChangeLog.EndBatch();
+					}
+					else if (ControllerType.BoolButtons.Contains(buttonName))
 					{
 						if (ModifierKeys != Keys.Alt)
 						{
@@ -721,7 +741,7 @@ namespace BizHawk.Client.EmuHawk
 
 		private void ToggleAutoFire(RollColumn col)
 		{
-			if (col.Name is FrameColumnName or CursorColumnName) return;
+			if (col.Name is FrameColumnName or CursorColumnName || TryGetVirtualAnalogColumn(col.Name, out _)) return;
 
 			col.Emphasis = !col.Emphasis;
 			UpdateAutoFire(col.Name, col.Emphasis);
@@ -737,6 +757,9 @@ namespace BizHawk.Client.EmuHawk
 
 		public void UpdateAutoFire(string button, bool? isOn)
 		{
+			// Virtual directions are one-shot views over an axis, not independent hold/autofire inputs.
+			if (TryGetVirtualAnalogColumn(button, out _)) return;
+
 			// No value means don't change whether it's on or off.
 			isOn ??= _inputRolls[0].AllColumns.Find(c => c.Name == button).Emphasis;
 
@@ -850,7 +873,7 @@ namespace BizHawk.Client.EmuHawk
 			{
 				_leftButtonHeld = true;
 
-				if (AxisEditingMode)
+				if (AxisEditingMode && !TryGetVirtualAnalogColumn(buttonName, out _))
 				{
 					if (ModifierKeys is Keys.Control or Keys.Shift)
 					{
@@ -888,7 +911,45 @@ namespace BizHawk.Client.EmuHawk
 					// So we want to block all frame advance operations while the user is changing input in the piano roll
 					MainForm.BlockFrameAdvance = true;
 
-					if (ControllerType.BoolButtons.Contains(buttonName))
+					if (TryGetVirtualAnalogColumn(buttonName, out VirtualAnalogColumn virtualColumn))
+					{
+						if (AxisEditingMode) AxisEditColumn = null;
+						_patternPaint = false; // virtual directions edit their backing axis directly; bool autofire patterns do not apply
+						_startBoolDrawColumn = buttonName;
+						var altOrShift4State = ModifierKeys & (Keys.Alt | Keys.Shift);
+						if (altOrShift4State is Keys.Shift)
+						{
+							if (!AnyRowsSelected) return;
+
+							var iFirstSelectedRow = FirstSelectedRowIndex;
+							var (firstSel, lastSel) = frame <= iFirstSelectedRow
+								? (frame, iFirstSelectedRow)
+								: (iFirstSelectedRow, frame);
+							bool allPressed = true;
+							for (var i = firstSel; i <= lastSel; i++)
+							{
+								if (i == CurrentTasMovie.FrameCount || !IsVirtualAnalogDirectionPressed(i, virtualColumn))
+								{
+									allPressed = false;
+									break;
+								}
+							}
+
+							_boolPaintState = !allPressed;
+							CurrentTasMovie.ChangeLog.BeginNewBatch($"Paint virtual {buttonName}: {firstSel}-{lastSel}");
+							CurrentTasMovie.SingleInvalidation(() =>
+							{
+								for (var i = firstSel; i <= lastSel; i++) SetVirtualAnalogDirection(i, buttonName, _boolPaintState);
+							});
+						}
+						else
+						{
+							_boolPaintState = !IsVirtualAnalogDirectionPressed(frame, virtualColumn);
+							CurrentTasMovie.ChangeLog.BeginNewBatch($"Paint virtual {buttonName} from frame {frame}");
+							SetVirtualAnalogDirection(frame, buttonName, _boolPaintState);
+						}
+					}
+					else if (ControllerType.BoolButtons.Contains(buttonName))
 					{
 						_patternPaint = false;
 						_startBoolDrawColumn = buttonName;
@@ -1565,7 +1626,14 @@ namespace BizHawk.Client.EmuHawk
 						}
 					}
 
-					CurrentTasMovie.SetBoolState(i, _startBoolDrawColumn, setVal); // Notice it uses new row, old column, you can only paint across a single column
+					if (TryGetVirtualAnalogColumn(_startBoolDrawColumn, out _))
+					{
+						SetVirtualAnalogDirection(i, _startBoolDrawColumn, setVal);
+					}
+					else
+				{
+						CurrentTasMovie.SetBoolState(i, _startBoolDrawColumn, setVal);
+					} // Notice it uses new row, old column, you can only paint across a single column
 				}
 			});
 		}
@@ -1628,6 +1696,7 @@ namespace BizHawk.Client.EmuHawk
 
 		private void UpdateInputRollDefinition(InputRoll roll)
 		{
+			SetVirtualAnalogColumnsOnRoll(roll);
 			var controlTuples = ControllerType.ControlsOrdered.SelectMany(x => x);
 			Dictionary<string, AxisSpec?> controlSpecs = new();
 			foreach (var tuple in controlTuples)
@@ -1644,7 +1713,7 @@ namespace BizHawk.Client.EmuHawk
 			foreach (RollColumn col in roll.VisibleColumns)
 			{
 				if (!controlSpecs.TryGetValue(col.Name, out AxisSpec? maybeSpec))
-					continue; // frame, cursor, or Lua column
+					continue; // frame, cursor, virtual analog direction, or Lua column
 
 				if (maybeSpec == null)
 					visibleDefinition.BoolButtons.Add(col.Name);
@@ -1652,6 +1721,19 @@ namespace BizHawk.Client.EmuHawk
 				{
 					AxisSpec spec = maybeSpec.Value;
 					visibleDefinition.AddAxis(col.Name, spec.Range, spec.Neutral, spec.IsReversed, spec.Constraint);
+				}
+			}
+
+			// A visible virtual direction edits the underlying real axes, so those axes must remain
+			// active even when their numeric columns are hidden in this roll.
+			foreach (RollColumn col in roll.VisibleColumns)
+			{
+				if (!TryGetVirtualAnalogColumn(col.Name, out VirtualAnalogColumn virtualColumn)) continue;
+				foreach (string axisName in new[] { virtualColumn.Stick.XAxisName, virtualColumn.Stick.YAxisName })
+				{
+					if (visibleDefinition.Axes.ContainsKey(axisName)) continue;
+					AxisSpec spec = ControllerType.Axes[axisName];
+					visibleDefinition.AddAxis(axisName, spec.Range, spec.Neutral, spec.IsReversed, spec.Constraint);
 				}
 			}
 

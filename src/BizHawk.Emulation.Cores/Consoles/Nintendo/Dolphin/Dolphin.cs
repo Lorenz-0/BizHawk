@@ -281,6 +281,10 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 				ret.AddAxis($"P{n} Main Stick Y", stickSpec.Range, stickSpec.Neutral);
 				ret.AddAxis($"P{n} C Stick X", stickSpec.Range, stickSpec.Neutral);
 				ret.AddAxis($"P{n} C Stick Y", stickSpec.Range, stickSpec.Neutral);
+				foreach (VirtualAnalogStick stick in DolphinStickDefinitions.GameCubeSticks(n))
+				{
+					ret.VirtualAnalogSticks.Add(stick);
+				}
 				ret.AddAxis($"P{n} Analog L", stickSpec.Range, stickSpec.Min);
 				ret.AddAxis($"P{n} Analog R", stickSpec.Range, stickSpec.Min);
 			}

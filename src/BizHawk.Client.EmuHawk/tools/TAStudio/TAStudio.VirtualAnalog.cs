@@ -34,6 +34,12 @@ namespace BizHawk.Client.EmuHawk
 			_ => throw new ArgumentOutOfRangeException(nameof(direction)),
 		};
 
+		private static string DirectionHeaderText(VirtualAnalogStick stick, VirtualAnalogStickDirection direction)
+		{
+			string stickName = stick.Name.StartsWith("P1 ", StringComparison.Ordinal) ? stick.Name[3..] : stick.Name;
+			return $"{stickName} {direction}";
+		}
+
 		private bool TryGetVirtualAnalogColumn(string columnName, out VirtualAnalogColumn column)
 			=> _virtualAnalogColumns.TryGetValue(columnName, out column);
 
@@ -73,9 +79,18 @@ namespace BizHawk.Client.EmuHawk
 				foreach (VirtualAnalogStickDirection direction in Enum.GetValues(typeof(VirtualAnalogStickDirection)).Cast<VirtualAnalogStickDirection>())
 				{
 					string name = stick.DirectionName(direction);
-					if (roll.AllColumns.Any(column => column.Name == name)) continue;
+					string headerText = DirectionHeaderText(stick, direction);
+					int headerWidth = UIHelper.UnscaleX(roll.GetCellWidthForText(headerText));
+					RollColumn? existingColumn = roll.AllColumns.FirstOrDefault(column => column.Name == name);
+					if (existingColumn is not null)
+					{
+						existingColumn.Text = headerText;
+						existingColumn.VerticalWidth = Math.Max(existingColumn.VerticalWidth, headerWidth);
+						existingColumn.HorizontalHeight = Math.Max(existingColumn.HorizontalHeight, headerWidth);
+						continue;
+					}
 
-					var column = new RollColumn(name, widthUnscaled: 10, text: DirectionGlyph(direction));
+					var column = new RollColumn(name, headerWidth, headerWidth, headerText);
 					if (insertIndex < 0)
 					{
 						roll.AllColumns.Add(column);

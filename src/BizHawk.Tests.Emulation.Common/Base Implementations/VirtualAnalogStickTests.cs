@@ -21,6 +21,7 @@ namespace BizHawk.Tests.Emulation.Common
 			Assert.IsTrue(stick.IsDirectionPressed(VirtualAnalogStickDirection.Right, 255, 128));
 			var axisSpec = new AxisSpec(0.RangeTo(255), 128);
 			Assert.AreEqual(0, stick.ValueForDirection(VirtualAnalogStickDirection.Up, axisSpec));
+			Assert.AreEqual(255, stick.ValueForDirection(VirtualAnalogStickDirection.Down, axisSpec));
 			Assert.AreEqual(255, stick.ValueForDirection(VirtualAnalogStickDirection.Right, axisSpec));
 
 			var reversedStick = stick with { XMinimumIsLeft = false, YMinimumIsUp = false };

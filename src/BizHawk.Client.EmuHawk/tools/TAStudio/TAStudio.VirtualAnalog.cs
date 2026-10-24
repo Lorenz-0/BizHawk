@@ -61,10 +61,11 @@ namespace BizHawk.Client.EmuHawk
 			AxisSpec axisSpec = ControllerType.Axes[axisName];
 			if (pressed)
 			{
+				// Use each core's full range: PSP is signed, while GameCube uses 0..255.
 				int axisValue = column.Direction switch
 				{
-					VirtualAnalogStickDirection.Up => 255,
-					VirtualAnalogStickDirection.Down => 0,
+					VirtualAnalogStickDirection.Up => axisSpec.Max,
+					VirtualAnalogStickDirection.Down => axisSpec.Min,
 					_ => column.Stick.ValueForDirection(column.Direction, axisSpec),
 				};
 				CurrentTasMovie.SetAxisState(frame, axisName, axisValue);

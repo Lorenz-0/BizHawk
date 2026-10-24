@@ -11,6 +11,10 @@ namespace BizHawk.Emulation.Cores.Consoles.Sony.PSP
 
 			foreach (var button in JoystickButtonCollection) controller.BoolButtons.Add($"P1 {button}");
 			foreach (var axis in JoystickAxisCollection) controller.AddAxis($"P1 {axis}", (-32768).RangeTo(32767), 0);
+			controller.VirtualAnalogSticks.Add(new(
+				"P1 Analog Nub",
+				$"P1 {JoystickAxes.LeftAnalogX}",
+				$"P1 {JoystickAxes.LeftAnalogY}"));
 
 			// If this is multi-disc, add a cd swap option
 			if (isMultiDisc)

@@ -13,23 +13,24 @@ namespace BizHawk.Tests.Emulation.Common
 		{
 			var stick = new VirtualAnalogStick("P1 Main Stick", "P1 Main Stick X", "P1 Main Stick Y");
 
-			Assert.IsTrue(stick.IsDirectionPressed(VirtualAnalogStickDirection.Up, 0, 128));
-			Assert.IsTrue(stick.IsDirectionPressed(VirtualAnalogStickDirection.Up, 127, 128));
+			Assert.IsFalse(stick.IsDirectionPressed(VirtualAnalogStickDirection.Up, 0, 128));
+			Assert.IsFalse(stick.IsDirectionPressed(VirtualAnalogStickDirection.Up, 127, 128));
 			Assert.IsFalse(stick.IsDirectionPressed(VirtualAnalogStickDirection.Up, 128, 128));
-			Assert.IsTrue(stick.IsDirectionPressed(VirtualAnalogStickDirection.Down, 129, 128));
+			Assert.IsTrue(stick.IsDirectionPressed(VirtualAnalogStickDirection.Up, 129, 128));
+			Assert.IsTrue(stick.IsDirectionPressed(VirtualAnalogStickDirection.Down, 127, 128));
 			Assert.IsTrue(stick.IsDirectionPressed(VirtualAnalogStickDirection.Left, 0, 128));
 			Assert.IsTrue(stick.IsDirectionPressed(VirtualAnalogStickDirection.Right, 255, 128));
 			var axisSpec = new AxisSpec(0.RangeTo(255), 128);
-			Assert.AreEqual(0, stick.ValueForDirection(VirtualAnalogStickDirection.Up, axisSpec));
-			Assert.AreEqual(255, stick.ValueForDirection(VirtualAnalogStickDirection.Down, axisSpec));
+			Assert.AreEqual(255, stick.ValueForDirection(VirtualAnalogStickDirection.Up, axisSpec));
+			Assert.AreEqual(0, stick.ValueForDirection(VirtualAnalogStickDirection.Down, axisSpec));
 			Assert.AreEqual(255, stick.ValueForDirection(VirtualAnalogStickDirection.Right, axisSpec));
 
 			var reversedStick = stick with { XMinimumIsLeft = false };
-			Assert.IsTrue(reversedStick.IsDirectionPressed(VirtualAnalogStickDirection.Up, 127, 128));
-			Assert.IsFalse(reversedStick.IsDirectionPressed(VirtualAnalogStickDirection.Up, 129, 128));
+			Assert.IsFalse(reversedStick.IsDirectionPressed(VirtualAnalogStickDirection.Up, 127, 128));
+			Assert.IsTrue(reversedStick.IsDirectionPressed(VirtualAnalogStickDirection.Up, 129, 128));
 			Assert.IsTrue(reversedStick.IsDirectionPressed(VirtualAnalogStickDirection.Left, 129, 128));
-			Assert.AreEqual(0, reversedStick.ValueForDirection(VirtualAnalogStickDirection.Up, axisSpec));
-			Assert.AreEqual(255, reversedStick.ValueForDirection(VirtualAnalogStickDirection.Down, axisSpec));
+			Assert.AreEqual(255, reversedStick.ValueForDirection(VirtualAnalogStickDirection.Up, axisSpec));
+			Assert.AreEqual(0, reversedStick.ValueForDirection(VirtualAnalogStickDirection.Down, axisSpec));
 		}
 
 		[TestMethod]

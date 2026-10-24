@@ -4,7 +4,7 @@ namespace BizHawk.Emulation.Common
 {
 	/// <summary>
 	/// Describes an analog stick as a set of virtual directional controls for UI editors.
-	/// Y values below neutral mean Up; values above neutral mean Down.
+	/// Y values above neutral mean Up; values below neutral mean Down.
 	/// These are metadata only: they are not controller inputs and are not serialized into movie logs.
 	/// </summary>
 	/// <param name="Name">A stable, player-qualified label used to name its virtual directions.</param>
@@ -26,8 +26,8 @@ namespace BizHawk.Emulation.Common
 		{
 			bool lowMeansThisDirection = direction switch
 			{
-				VirtualAnalogStickDirection.Up => true,
-				VirtualAnalogStickDirection.Down => false,
+				VirtualAnalogStickDirection.Up => false,
+				VirtualAnalogStickDirection.Down => true,
 				VirtualAnalogStickDirection.Left => XMinimumIsLeft,
 				VirtualAnalogStickDirection.Right => !XMinimumIsLeft,
 				_ => throw new ArgumentOutOfRangeException(nameof(direction)),
@@ -40,8 +40,8 @@ namespace BizHawk.Emulation.Common
 		{
 			bool lowMeansThisDirection = direction switch
 			{
-				VirtualAnalogStickDirection.Up => true,
-				VirtualAnalogStickDirection.Down => false,
+				VirtualAnalogStickDirection.Up => false,
+				VirtualAnalogStickDirection.Down => true,
 				VirtualAnalogStickDirection.Left => XMinimumIsLeft,
 				VirtualAnalogStickDirection.Right => !XMinimumIsLeft,
 				_ => throw new ArgumentOutOfRangeException(nameof(direction)),

@@ -63,8 +63,8 @@ namespace BizHawk.Client.EmuHawk
 			{
 				int axisValue = column.Direction switch
 				{
-					VirtualAnalogStickDirection.Up => 0,
-					VirtualAnalogStickDirection.Down => 255,
+					VirtualAnalogStickDirection.Up => 255,
+					VirtualAnalogStickDirection.Down => 0,
 					_ => column.Stick.ValueForDirection(column.Direction, axisSpec),
 				};
 				CurrentTasMovie.SetAxisState(frame, axisName, axisValue);

@@ -8,8 +8,8 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 		public static VirtualAnalogStick[] GameCubeSticks(int controller)
 			=>
 		[
-				new($"P{controller} Main Stick", $"P{controller} Main Stick X", $"P{controller} Main Stick Y", XMinimumIsLeft: true, YMinimumIsUp: true),
-				new($"P{controller} C Stick", $"P{controller} C Stick X", $"P{controller} C Stick Y", XMinimumIsLeft: true, YMinimumIsUp: true),
+				new($"P{controller} Main Stick", $"P{controller} Main Stick X", $"P{controller} Main Stick Y", XMinimumIsLeft: true),
+				new($"P{controller} C Stick", $"P{controller} C Stick X", $"P{controller} C Stick Y", XMinimumIsLeft: true),
 		];
 	}
 }

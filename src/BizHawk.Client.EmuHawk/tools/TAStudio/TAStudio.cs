@@ -1323,7 +1323,15 @@ namespace BizHawk.Client.EmuHawk
 					}
 					else
 					{
-						yield return (name, MovieSession.MovieController.Definition.MnemonicsCache[name].ToString(), 1);
+						string mnemonic = MovieSession.Movie.SystemID == VSystemID.Raw.PSP
+							? name switch
+							{
+								"P1 L Trigger" => "L.t",
+								"P1 R Trigger" => "R.t",
+								_ => MovieSession.MovieController.Definition.MnemonicsCache[name].ToString(),
+							}
+							: MovieSession.MovieController.Definition.MnemonicsCache[name].ToString();
+						yield return (name, mnemonic, 1);
 					}
 				}
 			}

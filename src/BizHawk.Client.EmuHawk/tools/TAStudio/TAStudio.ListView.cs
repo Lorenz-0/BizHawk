@@ -634,6 +634,13 @@ namespace BizHawk.Client.EmuHawk
 						? virtualColumn.Glyph
 						: "";
 				}
+				else if (MovieSession.Movie.SystemID == VSystemID.Raw.PSP
+					&& (columnName is "P1 L Trigger" or "P1 R Trigger"))
+				{
+					text = index < CurrentTasMovie.InputLogLength && CurrentTasMovie.BoolIsPressed(index, columnName)
+						? column.Text
+						: "";
+				}
 				else
 				{
 					// Display typed float value (string "-" can't be parsed, so CurrentTasMovie.DisplayValue can't return it)

@@ -40,7 +40,8 @@ namespace BizHawk.Emulation.Cores.Consoles.Sony.PSP
 			fi.input.ButtonLTrigger = controller.IsPressed($"P1 {JoystickButtons.ButtonLTrigger}") ? 1 : 0;
 			fi.input.ButtonRTrigger = controller.IsPressed($"P1 {JoystickButtons.ButtonRTrigger}") ? 1 : 0;
 			fi.input.LeftAnalogX = controller.AxisValue($"P1 {JoystickAxes.LeftAnalogX}");
-			fi.input.LeftAnalogY = controller.AxisValue($"P1 {JoystickAxes.LeftAnalogY}");
+			// The controller definition includes 32768 as the Down endpoint, but the PPSSPP input range tops out at 32767.
+			fi.input.LeftAnalogY = System.Math.Min(controller.AxisValue($"P1 {JoystickAxes.LeftAnalogY}"), short.MaxValue);
 
 			DriveLightOn = false;
 

@@ -24,9 +24,12 @@ namespace BizHawk.Tests.Emulation.Common
 			Assert.AreEqual(255, stick.ValueForDirection(VirtualAnalogStickDirection.Up, axisSpec));
 			Assert.AreEqual(0, stick.ValueForDirection(VirtualAnalogStickDirection.Down, axisSpec));
 			Assert.AreEqual(255, stick.ValueForDirection(VirtualAnalogStickDirection.Right, axisSpec));
-			var pspAxisSpec = new AxisSpec((-32768).RangeTo(32767), 0);
-			Assert.AreEqual(32767, stick.ValueForDirection(VirtualAnalogStickDirection.Up, pspAxisSpec));
-			Assert.AreEqual(-32768, stick.ValueForDirection(VirtualAnalogStickDirection.Down, pspAxisSpec));
+			var pspStick = stick with { YMinimumIsUp = true };
+			var pspAxisSpec = new AxisSpec((-32768).RangeTo(32768), 0);
+			Assert.IsTrue(pspStick.IsDirectionPressed(VirtualAnalogStickDirection.Up, -1, 0));
+			Assert.IsTrue(pspStick.IsDirectionPressed(VirtualAnalogStickDirection.Down, 1, 0));
+			Assert.AreEqual(-32768, pspStick.ValueForDirection(VirtualAnalogStickDirection.Up, pspAxisSpec));
+			Assert.AreEqual(32768, pspStick.ValueForDirection(VirtualAnalogStickDirection.Down, pspAxisSpec));
 
 			var reversedStick = stick with { XMinimumIsLeft = false };
 			Assert.IsFalse(reversedStick.IsDirectionPressed(VirtualAnalogStickDirection.Up, 127, 128));

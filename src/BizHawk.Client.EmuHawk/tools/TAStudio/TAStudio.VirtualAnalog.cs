@@ -36,8 +36,10 @@ namespace BizHawk.Client.EmuHawk
 
 		private static string DirectionHeaderText(VirtualAnalogStick stick, VirtualAnalogStickDirection direction)
 		{
-			string stickName = stick.Name.StartsWith("P1 ", StringComparison.Ordinal) ? stick.Name[3..] : stick.Name;
-			return $"{stickName} {direction}";
+			string stickName = stick.DisplayName
+				?? (stick.Name.StartsWith("P1 ", StringComparison.Ordinal) ? stick.Name[3..] : stick.Name);
+			string separator = stick.DisplayName is null ? " " : stick.DirectionSeparator;
+			return $"{stickName}{separator}{direction}";
 		}
 
 		private bool TryGetVirtualAnalogColumn(string columnName, out VirtualAnalogColumn column)
@@ -61,11 +63,11 @@ namespace BizHawk.Client.EmuHawk
 			AxisSpec axisSpec = ControllerType.Axes[axisName];
 			if (pressed)
 			{
-				// Use each core's full range: PSP is signed, while GameCube uses 0..255.
+				// Use the configured Y polarity and each core's full axis range.
 				int axisValue = column.Direction switch
 				{
-					VirtualAnalogStickDirection.Up => axisSpec.Max,
-					VirtualAnalogStickDirection.Down => axisSpec.Min,
+					VirtualAnalogStickDirection.Up => column.Stick.YMinimumIsUp ? axisSpec.Min : axisSpec.Max,
+					VirtualAnalogStickDirection.Down => column.Stick.YMinimumIsUp ? axisSpec.Max : axisSpec.Min,
 					_ => column.Stick.ValueForDirection(column.Direction, axisSpec),
 				};
 				CurrentTasMovie.SetAxisState(frame, axisName, axisValue);

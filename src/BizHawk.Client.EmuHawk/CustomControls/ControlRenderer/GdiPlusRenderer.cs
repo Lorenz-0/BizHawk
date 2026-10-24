@@ -13,7 +13,13 @@ namespace BizHawk.Client.EmuHawk.CustomControls
 		private readonly SolidBrush _currentStringBrush = ((SolidBrush) Brushes.Black).GetMutableCopy();
 
 		private Font _currentFont;
+		private readonly StringFormat _centeredStringFormat = new()
+		{
+			Alignment = StringAlignment.Center,
+			LineAlignment = StringAlignment.Center,
+		};
 		private bool _rotateString;
+		private bool _centerString;
 
 		public GdiPlusRenderer(Font font)
 		{
@@ -35,6 +41,7 @@ namespace BizHawk.Client.EmuHawk.CustomControls
 			_currentPen.Dispose();
 			_currentBrush.Dispose();
 			_currentStringBrush.Dispose();
+			_centeredStringFormat.Dispose();
 		}
 
 		public void DrawBitmap(Bitmap bitmap, Point point)
@@ -55,6 +62,10 @@ namespace BizHawk.Client.EmuHawk.CustomControls
 				_graphics.RotateTransform(90);
 				_graphics.DrawString(str, _currentFont, _currentStringBrush, Point.Empty);
 				_graphics.ResetTransform();
+			}
+			else if (_centerString)
+			{
+				_graphics.DrawString(str, _currentFont, _currentStringBrush, rect, _centeredStringFormat);
 			}
 			else
 			{
@@ -83,11 +94,12 @@ namespace BizHawk.Client.EmuHawk.CustomControls
 			return _graphics.MeasureString(str, font);
 		}
 
-		public void PrepDrawString(Font font, Color color, bool rotate = false)
+		public void PrepDrawString(Font font, Color color, bool rotate = false, bool center = false)
 		{
 			_currentFont = font;
 			_currentStringBrush.Color = color;
 			_rotateString = rotate;
+			_centerString = center;
 		}
 
 		public void SetBrush(Color color)

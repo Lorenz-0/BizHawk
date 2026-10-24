@@ -199,7 +199,12 @@ namespace BizHawk.Client.EmuHawk
 				_renderer.SetBrush(bgColor);
 				_renderer.FillRectangle(new Rectangle(x1, y1, x2 - x1, y2 - y1));
 
-				if (HorizontalOrientation)
+				if (targetCol.CenterCellText)
+				{
+					_renderer.PrepDrawString(Font, _foreColor, center: true);
+					_renderer.DrawString(text, new Rectangle(x1, y1, x2 - x1, y2 - y1));
+				}
+				else if (HorizontalOrientation)
 				{
 					_renderer.PrepDrawString(Font, _foreColor, rotate: targetCol.Rotatable);
 					_renderer.DrawString(text, new Rectangle(x2 - CellHeightPadding + offsetX - 1, y1 + CellWidthPadding + offsetY, x2 - x1, y2 - y1));
@@ -313,8 +318,14 @@ namespace BizHawk.Client.EmuHawk
 							foreColor = SystemColors.GrayText;
 							text = col.Text;
 						}
+						if (col.CenterCellText && !col.Rotatable)
+						{
+							_renderer.PrepDrawString(font, foreColor ?? _foreColor, center: true);
+							DrawString(text, new Rectangle(baseX, baseY, CellWidth, colHeight));
+						}
+					else
+					{
 						_renderer.PrepDrawString(font, foreColor ?? _foreColor, rotate: col.Rotatable);
-
 						int textWidth = (int)_renderer.MeasureString(text, font).Width;
 						if (col.Rotatable)
 						{
@@ -332,6 +343,7 @@ namespace BizHawk.Client.EmuHawk
 
 							DrawString(text, new Rectangle(baseX + textX, baseY + textY, MaxColumnWidth, CellHeight));
 						}
+					}
 					}
 				}
 			}
@@ -375,8 +387,16 @@ namespace BizHawk.Client.EmuHawk
 							text = column.Text;
 						}
 
-						_renderer.PrepDrawString(font, foreColor ?? _foreColor);
-						DrawString(text, new Rectangle(point.X + strOffsetX, point.Y + strOffsetY, column.ScaledWidth, ColumnHeight));
+						if (column.CenterCellText)
+						{
+							_renderer.PrepDrawString(font, foreColor ?? _foreColor, center: true);
+							DrawString(text, new Rectangle(column.Left - _hBar.Value, RowsToPixels(i), column.ScaledWidth, CellHeight));
+						}
+						else
+						{
+							_renderer.PrepDrawString(font, foreColor ?? _foreColor);
+							DrawString(text, new Rectangle(point.X + strOffsetX, point.Y + strOffsetY, column.ScaledWidth, ColumnHeight));
+						}
 					}
 				}
 			}

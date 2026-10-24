@@ -61,7 +61,13 @@ namespace BizHawk.Client.EmuHawk
 			AxisSpec axisSpec = ControllerType.Axes[axisName];
 			if (pressed)
 			{
-				CurrentTasMovie.SetAxisState(frame, axisName, column.Stick.ValueForDirection(column.Direction, axisSpec));
+				int axisValue = column.Direction switch
+				{
+					VirtualAnalogStickDirection.Up => 0,
+					VirtualAnalogStickDirection.Down => 255,
+					_ => column.Stick.ValueForDirection(column.Direction, axisSpec),
+				};
+				CurrentTasMovie.SetAxisState(frame, axisName, axisValue);
 			}
 			else if (IsVirtualAnalogDirectionPressed(frame, column))
 			{
@@ -85,12 +91,16 @@ namespace BizHawk.Client.EmuHawk
 					if (existingColumn is not null)
 					{
 						existingColumn.Text = headerText;
+						existingColumn.CenterCellText = true;
 						existingColumn.VerticalWidth = Math.Max(existingColumn.VerticalWidth, headerWidth);
 						existingColumn.HorizontalHeight = Math.Max(existingColumn.HorizontalHeight, headerWidth);
 						continue;
 					}
 
-					var column = new RollColumn(name, headerWidth, headerWidth, headerText);
+					var column = new RollColumn(name, headerWidth, headerWidth, headerText)
+					{
+						CenterCellText = true,
+					};
 					if (insertIndex < 0)
 					{
 						roll.AllColumns.Add(column);

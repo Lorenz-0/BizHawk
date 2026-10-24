@@ -44,6 +44,11 @@ namespace BizHawk.Client.EmuHawk
 		public bool Emphasis { get; set; }
 
 		/// <summary>
+		/// Cell contents will be centered both horizontally and vertically if true.
+		/// </summary>
+		public bool CenterCellText { get; set; }
+
+		/// <summary>
 		/// Column text will be drawn rotated if true
 		/// </summary>
 		public bool Rotatable { get; set; }

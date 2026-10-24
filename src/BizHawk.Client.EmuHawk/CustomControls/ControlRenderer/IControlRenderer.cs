@@ -18,7 +18,7 @@ namespace BizHawk.Client.EmuHawk.CustomControls
 		void SetBrush(Color color);
 		void SetSolidPen(Color color);
 
-		void PrepDrawString(Font font, Color color, bool rotate = false);
+		void PrepDrawString(Font font, Color color, bool rotate = false, bool center = false);
 
 		/// <summary>
 		/// Draw the given string using the given font and foreground color at the X/Y of the given rect.

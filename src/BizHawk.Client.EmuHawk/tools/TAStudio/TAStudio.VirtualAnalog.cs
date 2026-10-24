@@ -8,7 +8,7 @@ namespace BizHawk.Client.EmuHawk
 {
 	public partial class TAStudio
 	{
-		private sealed record VirtualAnalogColumn(VirtualAnalogStick Stick, VirtualAnalogStickDirection Direction, string Glyph);
+		private sealed record class VirtualAnalogColumn(VirtualAnalogStick Stick, VirtualAnalogStickDirection Direction, string Glyph);
 
 		private readonly Dictionary<string, VirtualAnalogColumn> _virtualAnalogColumns = new();
 

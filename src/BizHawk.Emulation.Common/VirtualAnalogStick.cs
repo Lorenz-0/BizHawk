@@ -11,7 +11,7 @@ namespace BizHawk.Emulation.Common
 	/// <param name="YAxisName">The real Y-axis input name.</param>
 	/// <param name="XMinimumIsLeft">Whether the lower X range means left.</param>
 	/// <param name="YMinimumIsUp">Whether the lower Y range means up.</param>
-	public sealed record VirtualAnalogStick(
+	public sealed record class VirtualAnalogStick(
 		string Name,
 		string XAxisName,
 		string YAxisName,

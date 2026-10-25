@@ -32,61 +32,89 @@ namespace BizHawk.Client.EmuHawk
 					Environment.GetFolderPath(Environment.SpecialFolder.MyVideos),
 					windowTitle: "Select a BizHawk JMD capture to convert");
 				if (files is null || files.Count == 0) return;
-
-				var inputPath = files[0];
-				var inspectProgress = new ConversionProgress();
-				var inspectTask = Task.Run(() => Inspect(inputPath, inspectProgress));
-				using (var progressForm = new ConversionProgressForm(inspectTask, inspectProgress, "Analyzing JMD timestamps and video dimensions..."))
-				{
-					parent.ShowDialogWithTempMute(progressForm);
-				}
-				var info = inspectTask.GetAwaiter().GetResult();
-
-				using var writer = new FFmpegWriter(parent);
-				using var codecToken = writer.AcquireVideoCodecToken(config);
-				if (codecToken is null) return;
-				writer.SetVideoCodecToken(codecToken);
-				if (!string.Equals(writer.DesiredExtension(), "mp4", StringComparison.OrdinalIgnoreCase))
-				{
-					parent.DialogController.ShowMessageBox(
-						parent,
-						"Choose the MP4 preset in the FFmpeg format list, then try the conversion again.",
-						"MP4 preset required");
-					return;
-				}
-
-				var outputPath = parent.DialogController.ShowFileSaveDialog(
-					parent,
-					discardCWDChange: true,
-					fileExt: "mp4",
-					filterStr: "MP4 video (*.mp4)|*.mp4",
-					initDir: Path.GetDirectoryName(inputPath) ?? string.Empty,
-					initFileName: Path.GetFileNameWithoutExtension(inputPath) + ".mp4",
-					muteOverwriteWarning: false);
-				if (string.IsNullOrWhiteSpace(outputPath)) return;
-				if (!string.Equals(Path.GetExtension(outputPath), ".mp4", StringComparison.OrdinalIgnoreCase))
-				{
-					outputPath += ".mp4";
-				}
-
-				var tempPath = CreateTempOutputPath(outputPath);
-				var progress = new ConversionProgress();
-				var task = Task.Run(() => ConvertFile(inputPath, tempPath, outputPath, info, writer, progress));
-				using (var progressForm = new ConversionProgressForm(task, progress, "Encoding MP4 from the JMD capture. This may take a while..."))
-				{
-					parent.ShowDialogWithTempMute(progressForm);
-				}
-				var sourceDeleted = task.GetAwaiter().GetResult();
-				var completionMessage = sourceDeleted
-					? $"MP4 export complete. The original JMD was deleted:\n{outputPath}"
-					: $"MP4 export complete, but the original JMD could not be deleted:\n{outputPath}";
-				parent.DialogController.ShowMessageBox(parent, completionMessage, "JMD export complete");
+				RunForInput(parent, config, files[0]);
 			}
 			catch (Exception e)
 			{
-				parent.DialogController.ShowMessageBox(parent, $"JMD to MP4 conversion failed:\n\n{e.Message}", "JMD export failed");
+				ShowFailure(parent, e);
 			}
 		}
+
+		public static void RunForRecording(MainForm parent, Config config, string inputPath)
+		{
+			try
+			{
+				RunForInput(parent, config, inputPath);
+			}
+			catch (Exception e)
+			{
+				ShowFailure(parent, e);
+			}
+		}
+
+		private static void RunForInput(MainForm parent, Config config, string inputPath)
+		{
+			using var writer = new FFmpegWriter(parent);
+			using var codecToken = writer.AcquireVideoCodecToken(config);
+			if (codecToken is null)
+			{
+				parent.DialogController.ShowMessageBox(
+					parent,
+					$"MP4 conversion was canceled. The source JMD was kept:\n{inputPath}",
+					"JMD recording kept");
+				return;
+			}
+			writer.SetVideoCodecToken(codecToken);
+			if (!string.Equals(writer.DesiredExtension(), "mp4", StringComparison.OrdinalIgnoreCase))
+			{
+				parent.DialogController.ShowMessageBox(
+					parent,
+					"Choose the MP4 preset in the FFmpeg format list, then try again. The source JMD was kept.",
+					"MP4 preset required");
+				return;
+			}
+
+			var outputPath = parent.DialogController.ShowFileSaveDialog(
+				parent,
+				discardCWDChange: true,
+				fileExt: "mp4",
+				filterStr: "MP4 video (*.mp4)|*.mp4",
+				initDir: Path.GetDirectoryName(inputPath) ?? string.Empty,
+				initFileName: Path.GetFileNameWithoutExtension(inputPath) + ".mp4",
+				muteOverwriteWarning: false);
+			if (string.IsNullOrWhiteSpace(outputPath)) return;
+			if (!string.Equals(Path.GetExtension(outputPath), ".mp4", StringComparison.OrdinalIgnoreCase))
+			{
+				outputPath += ".mp4";
+			}
+
+			var inspectProgress = new ConversionProgress();
+			var inspectTask = Task.Run(() => Inspect(inputPath, inspectProgress));
+			using (var progressForm = new ConversionProgressForm(inspectTask, inspectProgress, "Analyzing JMD timestamps and video dimensions..."))
+			{
+				parent.ShowDialogWithTempMute(progressForm);
+			}
+			var info = inspectTask.GetAwaiter().GetResult();
+
+			var tempPath = CreateTempOutputPath(outputPath);
+			var progress = new ConversionProgress();
+			var task = Task.Run(() => ConvertFile(inputPath, tempPath, outputPath, info, writer, progress));
+			using (var progressForm = new ConversionProgressForm(task, progress, "Encoding MP4 from the JMD capture. This may take a while..."))
+			{
+				parent.ShowDialogWithTempMute(progressForm);
+			}
+			var sourceDeleted = task.GetAwaiter().GetResult();
+			var completionMessage = sourceDeleted
+				? $"MP4 export complete. The original JMD was deleted:\n{outputPath}"
+				: $"MP4 export complete, but the original JMD could not be deleted:\n{outputPath}";
+			parent.DialogController.ShowMessageBox(parent, completionMessage, "JMD export complete");
+		}
+
+		private static void ShowFailure(MainForm parent, Exception e)
+			=> parent.DialogController.ShowMessageBox(
+				parent,
+				$"JMD to MP4 conversion failed. The source JMD was kept.\n\n{e.Message}",
+				"JMD export failed");
 
 		private static CaptureInfo Inspect(string path, ConversionProgress progress)
 		{
@@ -275,6 +303,10 @@ namespace BizHawk.Client.EmuHawk
 				}
 				InstallOutput(tempPath, outputPath);
 				exportSucceeded = true;
+				if (!string.Equals(
+					Path.GetExtension(inputPath),
+					".jmd",
+					StringComparison.OrdinalIgnoreCase)) return false;
 				try
 				{
 					File.Delete(inputPath);

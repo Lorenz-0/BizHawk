@@ -1692,6 +1692,7 @@ namespace BizHawk.Client.EmuHawk
 
 		// AVI/WAV state
 		private IVideoWriter _currAviWriter;
+		private string _jmdAutoConvertPath;
 
 		// Sound refactor TODO: we can enforce async mode here with a property that gets/sets this but does an async check
 		private ISoundProvider _aviSoundInputAsync; // Note: This sound provider must be in async mode!
@@ -2158,6 +2159,7 @@ namespace BizHawk.Client.EmuHawk
 
 		private void Shutdown()
 		{
+			_jmdAutoConvertPath = null;
 			_currAviWriter?.CloseFile();
 			_currAviWriter = null;
 			MovieSession.IsAvDumpActive = false;
@@ -3208,6 +3210,7 @@ namespace BizHawk.Client.EmuHawk
 
 			try
 			{
+				var autoConvertJmd = aw is JmdWriter;
 #if AVI_SUPPORT
 				bool usingAvi = aw is AviWriter; // SO GROSS!
 #else
@@ -3249,14 +3252,14 @@ namespace BizHawk.Client.EmuHawk
 				}
 
 				// select file to save to
+				string pathForOpenFile;
 				if (unattended && !string.IsNullOrEmpty(filename))
 				{
-					aw.OpenFile(filename);
+					pathForOpenFile = filename;
 				}
 				else
 				{
 					string ext = aw.DesiredExtension();
-					string pathForOpenFile;
 
 					// handle directories first
 					if (ext == "<directory>")
@@ -3283,8 +3286,15 @@ namespace BizHawk.Client.EmuHawk
 						}
 						pathForOpenFile = result;
 					}
+				}
 
-					aw.OpenFile(pathForOpenFile);
+				aw.OpenFile(pathForOpenFile);
+				_jmdAutoConvertPath = null;
+				if (autoConvertJmd)
+				{
+					_jmdAutoConvertPath = string.Equals(Path.GetExtension(pathForOpenFile), ".jmd", StringComparison.OrdinalIgnoreCase)
+						? pathForOpenFile
+						: pathForOpenFile + ".jmd";
 				}
 
 				// commit the avi writing last, in case there were any errors earlier
@@ -3297,6 +3307,7 @@ namespace BizHawk.Client.EmuHawk
 			}
 			catch
 			{
+				_jmdAutoConvertPath = null;
 				AddOnScreenMessage("A/V capture failed!");
 				aw.Dispose();
 				throw;
@@ -3461,12 +3472,14 @@ namespace BizHawk.Client.EmuHawk
 		{
 			if (_currAviWriter == null)
 			{
+				_jmdAutoConvertPath = null;
 				MovieSession.IsAvDumpActive = false;
 				_dumpProxy = null;
 				RewireSound();
 				return;
 			}
 
+			_jmdAutoConvertPath = null;
 			_currAviWriter.Dispose();
 			_currAviWriter = null;
 			MovieSession.IsAvDumpActive = false;
@@ -3483,12 +3496,15 @@ namespace BizHawk.Client.EmuHawk
 		{
 			if (_currAviWriter == null)
 			{
+				_jmdAutoConvertPath = null;
 				MovieSession.IsAvDumpActive = false;
 				_dumpProxy = null;
 				RewireSound();
 				return;
 			}
 
+			var jmdPathToAutoConvert = _jmdAutoConvertPath;
+			_jmdAutoConvertPath = null;
 			_currAviWriter.CloseFile();
 			_currAviWriter.Dispose();
 			_currAviWriter = null;
@@ -3500,6 +3516,10 @@ namespace BizHawk.Client.EmuHawk
 			_aviSoundInputAsync = null;
 			_dumpProxy = null; // return to normal sound output
 			RewireSound();
+			if (jmdPathToAutoConvert is not null)
+			{
+				JmdMp4Exporter.RunForRecording(this, Config, jmdPathToAutoConvert);
+			}
 		}
 
 		private void AvFrameAdvance()

@@ -19,7 +19,7 @@ namespace BizHawk.Client.EmuHawk
 	/// so each dump is always one file
 	/// they can be processed with JPC-rr streamtools or JMDSource (avisynth)
 	/// </summary>
-	[VideoWriter("jmd", "JMD writer", "Writes a JPC-rr multidump file (JMD).  These can be read and further processed with jpc-streamtools.  One JMD file contains all audio (uncompressed) and video (compressed).")]
+	[VideoWriter("jmd", "JMD (FFmpeg)", "Records a JPC-RR multidump file (JMD), then prompts for an FFmpeg MP4 preset and automatically exports to MP4 when recording stops. The JMD is kept if export is canceled or fails.")]
 	public class JmdWriter : IVideoWriter
 	{
 		// We formerly used a compressor that supported 0-9 values for compression level

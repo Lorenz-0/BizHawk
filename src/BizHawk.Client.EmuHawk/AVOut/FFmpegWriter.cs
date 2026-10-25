@@ -245,9 +245,9 @@ namespace BizHawk.Client.EmuHawk
 		private volatile Exception _pumpError;
 
 		/// <summary>
-		/// writes queued frames to the muxer (and thus the ffmpeg pipe) off the main thread, so a pipe
-		/// that stops draining can never block the client UI; the bounded queue plus TryAdd timeout
-		/// turn a wedged ffmpeg into an exception on the calling thread instead of an infinite hang
+		/// writes queued frames to the muxer (and thus the ffmpeg pipe) off the main thread. The bounded
+		/// queue applies backpressure when encoding falls behind; the pipe-write timeout detects a wedged
+		/// ffmpeg process and the producer surfaces that failure instead of waiting forever.
 		/// </summary>
 		private void PumpLoop()
 		{
@@ -277,11 +277,25 @@ namespace BizHawk.Client.EmuHawk
 
 		private void Enqueue(Job j)
 		{
-			if (_pumpError is not null) throw new Exception("ffmpeg pump died", _pumpError);
-			if (!_jobs.TryAdd(j, TimeSpan.FromSeconds(10)))
+			while (true)
 			{
-				StallDiag.Note($"Enqueue TIMEOUT queued={_jobs.Count} exited={_ffmpeg.HasExited}");
-				throw new TimeoutException($"ffmpeg not consuming: queued={_jobs.Count} exited={_ffmpeg.HasExited}\n{FfmpegGetError()}");
+				if (_pumpError is not null) throw new Exception("ffmpeg pump died", _pumpError);
+
+				try
+				{
+					// Apply backpressure instead of aborting a valid recording just because FFmpeg fell
+					// more than ten seconds behind (e.g. while TAStudio is doing extra per-frame work).
+					if (_jobs.TryAdd(j, TimeSpan.FromMilliseconds(250))) return;
+				}
+				catch (InvalidOperationException e) when (_jobs.IsAddingCompleted)
+				{
+					throw new Exception("ffmpeg pump stopped accepting jobs", _pumpError ?? e);
+				}
+
+				if (_ffmpeg.HasExited)
+				{
+					throw new Exception($"unexpected ffmpeg death:\n{FfmpegGetError()}");
+				}
 			}
 		}
 
@@ -406,8 +420,16 @@ namespace BizHawk.Client.EmuHawk
 
 			var video = source.GetVideoBuffer();
 			var buf = ArrayPool<int>.Shared.Rent(_width * _height);
-			Array.Copy(video, 0, buf, 0, _width * _height);
-			Enqueue(new Job(buf, _width * _height, null));
+			try
+			{
+				Array.Copy(video, 0, buf, 0, _width * _height);
+				Enqueue(new Job(buf, _width * _height, null));
+			}
+			catch
+			{
+				ArrayPool<int>.Shared.Return(buf);
+				throw;
+			}
 		}
 
 		public IDisposable AcquireVideoCodecToken(Config config)

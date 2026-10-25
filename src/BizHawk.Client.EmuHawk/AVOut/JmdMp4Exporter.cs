@@ -76,8 +76,11 @@ namespace BizHawk.Client.EmuHawk
 				{
 					parent.ShowDialogWithTempMute(progressForm);
 				}
-				task.GetAwaiter().GetResult();
-				parent.DialogController.ShowMessageBox(parent, $"MP4 export complete:\n{outputPath}", "JMD export complete");
+				var sourceDeleted = task.GetAwaiter().GetResult();
+				var completionMessage = sourceDeleted
+					? $"MP4 export complete. The original JMD was deleted:\n{outputPath}"
+					: $"MP4 export complete, but the original JMD could not be deleted:\n{outputPath}";
+				parent.DialogController.ShowMessageBox(parent, completionMessage, "JMD export complete");
 			}
 			catch (Exception e)
 			{
@@ -187,7 +190,7 @@ namespace BizHawk.Client.EmuHawk
 			return a;
 		}
 
-		private static void ConvertFile(string inputPath, string tempPath, string outputPath, CaptureInfo info, FFmpegWriter writer, ConversionProgress progress)
+		private static bool ConvertFile(string inputPath, string tempPath, string outputPath, CaptureInfo info, FFmpegWriter writer, ConversionProgress progress)
 		{
 			var exportSucceeded = false;
 			try
@@ -263,8 +266,24 @@ namespace BizHawk.Client.EmuHawk
 
 				progress.SetPercent(1000);
 				writer.CloseFile();
+				if (writer.LastExitCode != 0)
+				{
+					var exitMessage = writer.LastExitCode is int exitCode
+						? $"FFmpeg exited with code {exitCode}."
+						: "FFmpeg did not exit cleanly.";
+					throw new InvalidOperationException($"{exitMessage} The original JMD was kept.");
+				}
 				InstallOutput(tempPath, outputPath);
 				exportSucceeded = true;
+				try
+				{
+					File.Delete(inputPath);
+					return !File.Exists(inputPath);
+				}
+				catch
+				{
+					return false;
+				}
 			}
 			finally
 			{

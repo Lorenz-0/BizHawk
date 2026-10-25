@@ -73,6 +73,11 @@ namespace BizHawk.Client.EmuHawk
 
 		public FFmpegWriter(IDialogParent dialogParent) => _dialogParent = dialogParent;
 
+		/// <summary>
+		/// Exit code of the most recently closed FFmpeg process, or null if it did not exit.
+		/// </summary>
+		internal int? LastExitCode { get; private set; }
+
 		public void SetFrame(int frame)
 		{
 		}
@@ -91,6 +96,7 @@ namespace BizHawk.Client.EmuHawk
 		/// </summary>
 		private void OpenFileSegment()
 		{
+			LastExitCode = null;
 			try
 			{
 				_ffmpeg = OSTailoredCode.ConstructSubshell(
@@ -359,6 +365,7 @@ namespace BizHawk.Client.EmuHawk
 				//               handling to finish; this call (process confirmed exited) flushes the events
 				_ffmpeg.WaitForExit();
 			}
+			LastExitCode = _ffmpeg.HasExited ? _ffmpeg.ExitCode : null;
 			lock (_stderrLock)
 			{
 				_stderr = null;

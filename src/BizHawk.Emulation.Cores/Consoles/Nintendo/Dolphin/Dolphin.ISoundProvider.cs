@@ -13,7 +13,7 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 		private double _resampleStep = 48000.0 / 44100.0;
 		private double _rateEst;
 
-		// native 48 kHz staging buffer, with room for one carry frame at the front
+		// native interleaved-stereo staging buffer, with room for one carry frame at the front
 		private short[] _rawBuf = new short[1024 * 2];
 		// resampled 44.1 kHz output buffer (returned oversized, consumers must use nsamp);
 		// the fill happens on the core step thread, so GetSamplesSync swaps to a spare buffer and the
@@ -28,14 +28,52 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 		// fractional read position relative to the carry frame, in [0, RESAMPLE_STEP)
 		private double _resamplePos;
 
-		// cumulative sample-frame budget and total emitted, for exact per-frame counts;
+		// cumulative 44.1 kHz sample-frame budget and scheduled total;
 		// nsamp is always whole stereo frames, i.e. an even sample count
 		private double _sampCarry;
 		private int _emitted;
 
+		// Small non-blocking staging FIFO absorbs per-frame sample-count jitter without injecting silence.
+		private short[] _audioFifo = new short[2048 * 2];
+		private int _audioFifoStart;
+		private int _audioFifoCount;
+
 		private void ProcessSound()
 		{
 			lock (_soundLock) ProcessSoundLocked();
+		}
+
+		private void EnqueueAudio(short[] samples, int frames)
+		{
+			int sampleCount = frames * 2;
+			int requiredCapacity = _audioFifoCount + sampleCount;
+			if (requiredCapacity > _audioFifo.Length)
+			{
+				var larger = new short[Math.Max(requiredCapacity, _audioFifo.Length * 2)];
+				int firstPart = Math.Min(_audioFifoCount, _audioFifo.Length - _audioFifoStart);
+				Array.Copy(_audioFifo, _audioFifoStart, larger, 0, firstPart);
+				Array.Copy(_audioFifo, 0, larger, firstPart, _audioFifoCount - firstPart);
+				_audioFifo = larger;
+				_audioFifoStart = 0;
+			}
+
+			int writeAt = (_audioFifoStart + _audioFifoCount) % _audioFifo.Length;
+			int firstWrite = Math.Min(sampleCount, _audioFifo.Length - writeAt);
+			Array.Copy(samples, 0, _audioFifo, writeAt, firstWrite);
+			Array.Copy(samples, firstWrite, _audioFifo, 0, sampleCount - firstWrite);
+			_audioFifoCount += sampleCount;
+		}
+
+		private int DequeueAudio(short[] destination, int maxFrames)
+		{
+			int sampleCount = Math.Min(_audioFifoCount, maxFrames * 2) & ~1;
+			int firstPart = Math.Min(sampleCount, _audioFifo.Length - _audioFifoStart);
+			Array.Copy(_audioFifo, _audioFifoStart, destination, 0, firstPart);
+			Array.Copy(_audioFifo, 0, destination, firstPart, sampleCount - firstPart);
+			_audioFifoStart = (_audioFifoStart + sampleCount) % _audioFifo.Length;
+			_audioFifoCount -= sampleCount;
+			if (_audioFifoCount == 0) _audioFifoStart = 0;
+			return sampleCount / 2;
 		}
 
 		private void ProcessSoundLocked()
@@ -87,26 +125,20 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 				_carryR = _rawBuf[(inFrames - 1) * 2 + 1];
 			}
 
-			// the frontend paces A/V dumping off the sample count (VideoStretcher drops or dups video
-			// frames when a chunk deviates from the expected per-frame count), so emit exactly
-			// rate * fpsDen / fpsNum stereo frames per frame on a cumulative carry: pad short chunks
-			// with silence (the native mixer legitimately produces nothing on IPL boot / GPU lag
-			// frames) and trim the rare surplus frame
+			// Buffer real resampled audio across frame boundaries. Padding each short native chunk
+			// with silence creates audible gaps; the FIFO lets later surplus absorb small count jitter.
+			if (outFrames > 0) EnqueueAudio(_sampleBuf, outFrames);
+
 			_sampCarry += 44100.0 * _vsync.Den / _vsync.Num;
 			var want = (int)((long)Math.Round(_sampCarry) - _emitted);
 			if (want < 0) want = 0;
-			if (outFrames > want)
-			{
-				outFrames = want;
-			}
-			else if (outFrames < want)
-			{
-				if (want * 2 > _sampleBuf.Length) _sampleBuf = new short[want * 2];
-				Array.Clear(_sampleBuf, outFrames * 2, (want - outFrames) * 2);
-				outFrames = want;
-			}
+			var availableFrames = _audioFifoCount / 2;
+			var framesToReturn = Math.Min(want, availableFrames);
+			if (framesToReturn * 2 > _sampleBuf.Length) _sampleBuf = new short[framesToReturn * 2];
+			outFrames = DequeueAudio(_sampleBuf, framesToReturn);
 
-			_emitted += outFrames;
+			// Advance the output clock by the scheduled count, not by the possibly-short read.
+			_emitted += want;
 			_nsamps = outFrames;
 		}
 
@@ -119,6 +151,8 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 			lock (_soundLock)
 			{
 				_nsamps = 0;
+				_audioFifoStart = 0;
+				_audioFifoCount = 0;
 			}
 		}
 

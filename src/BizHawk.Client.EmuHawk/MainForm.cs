@@ -537,6 +537,10 @@ namespace BizHawk.Client.EmuHawk
 #else
 			SynclessRecordingMenuItem.Enabled = false;
 #endif
+			var convertJmdMenuItem = new ToolStripMenuItem("Convert JMD to MP4...");
+			convertJmdMenuItem.Click += (_, _) => JmdMp4Exporter.Run(this, Config);
+			AVSubMenu.DropDownItems.Add(new ToolStripSeparator());
+			AVSubMenu.DropDownItems.Add(convertJmdMenuItem);
 
 			Game = GameInfo.NullInstance;
 			_throttle = new Throttle();

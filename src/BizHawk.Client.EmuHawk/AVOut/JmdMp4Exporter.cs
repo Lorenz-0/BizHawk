@@ -3,6 +3,8 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Diagnostics;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -17,6 +19,7 @@ namespace BizHawk.Client.EmuHawk
 	{
 		private const int AudioSampleRate = 44100;
 		private const int MaxFrameBytes = 256 * 1024 * 1024;
+		private static long _nextTempFileSuffix;
 
 		public static void Run(MainForm parent, Config config)
 		{
@@ -67,9 +70,7 @@ namespace BizHawk.Client.EmuHawk
 					outputPath += ".mp4";
 				}
 
-				var tempPath = Path.Combine(
-					Path.GetDirectoryName(Path.GetFullPath(outputPath))!,
-					$"{Path.GetFileNameWithoutExtension(outputPath)}.converting-{Guid.NewGuid():N}.mp4");
+				var tempPath = CreateTempOutputPath(outputPath);
 				var progress = new ConversionProgress();
 				var task = Task.Run(() => ConvertFile(inputPath, tempPath, outputPath, info, writer, progress));
 				using (var progressForm = new ConversionProgressForm(task, progress, "Encoding MP4 from the JMD capture. This may take a while..."))
@@ -330,6 +331,27 @@ namespace BizHawk.Client.EmuHawk
 			finally
 			{
 				ArrayPool<byte>.Shared.Return(raw);
+			}
+		}
+
+		private static string CreateTempOutputPath(string outputPath)
+		{
+			using var process = Process.GetCurrentProcess();
+			var directory = Path.GetDirectoryName(Path.GetFullPath(outputPath))!;
+			var basename = Path.GetFileNameWithoutExtension(outputPath);
+			while (true)
+			{
+				var suffix = Interlocked.Increment(ref _nextTempFileSuffix);
+				var candidate = Path.Combine(directory, $"{basename}.converting-{process.Id}-{suffix}.mp4");
+				try
+				{
+					using var reservation = new FileStream(candidate, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+					return candidate;
+				}
+				catch (IOException) when (File.Exists(candidate))
+				{
+					// A previous run or another conversion already owns this name. Try the next counter.
+				}
 			}
 		}
 

@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Diagnostics;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -341,7 +340,7 @@ namespace BizHawk.Client.EmuHawk
 			var basename = Path.GetFileNameWithoutExtension(outputPath);
 			while (true)
 			{
-				var suffix = Interlocked.Increment(ref _nextTempFileSuffix);
+				var suffix = System.Threading.Interlocked.Increment(ref _nextTempFileSuffix);
 				var candidate = Path.Combine(directory, $"{basename}.converting-{process.Id}-{suffix}.mp4");
 				try
 				{

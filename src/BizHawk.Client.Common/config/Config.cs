@@ -371,6 +371,10 @@ namespace BizHawk.Client.Common
 		public int JmdThreads { get; set; } = 3;
 		public string FFmpegFormat { get; set; } = "";
 		public string FFmpegCustomCommand { get; set; } = "-c:a foo -c:v bar -f baz";
+		// Native Media Foundation MP4 writer bitrates; valid ranges and defaults are
+		// defined by MediaFoundationMp4Writer in EmuHawk (defaults must match).
+		public int MfMp4VideoBitrateKbps { get; set; } = 8000;
+		public int MfMp4AudioBitrateKbps { get; set; } = 192;
 		public string AviCodecToken { get; set; } = "";
 		public int GifWriterFrameskip { get; set; } = 3;
 		public int GifWriterDelay { get; set; } = -1;

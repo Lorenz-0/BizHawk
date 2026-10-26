@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -11,25 +12,107 @@ using BizHawk.Emulation.Common;
 namespace BizHawk.Client.EmuHawk
 {
 	/// <summary>
-	/// Experimental Windows Media Foundation H.264/AAC MP4 writer. This first integration
-	/// deliberately has fixed quality settings and splits output when the emulated resolution changes.
+	/// Experimental Windows Media Foundation H.264/AAC MP4 writer with configurable video/audio
+	/// bitrates (see <see cref="CodecToken"/>). Splits output when the emulated resolution changes.
 	/// All Media Foundation COM calls are confined to a dedicated MTA worker thread.
 	/// </summary>
-	[VideoWriter("mfmp4", "Native MP4 writer (Media Foundation)", "Encodes H.264 video and AAC audio into MP4 using Windows Media Foundation. Splits on resolution change.")]
+	[VideoWriter("mfmp4", "Native MP4 writer (Media Foundation)", "Encodes H.264 video and AAC audio into MP4 using Windows Media Foundation, with configurable video and audio bitrates. Splits on resolution change.")]
 	public sealed class MediaFoundationMp4Writer : IVideoWriter
 	{
-		private const uint DefaultVideoBitrate = 4_000_000;
-		private const uint AudioBitrate = 192_000;
+		/// <summary>Default video bitrate (8 Mbps), used when no valid persisted value is available.</summary>
+		public const int DefaultVideoBitrateKbps = 8_000;
+
+		/// <summary>Default audio bitrate, used when no valid persisted value is available.</summary>
+		public const int DefaultAudioBitrateKbps = 192;
+
+		/// <summary>
+		/// Lowest video bitrate accepted by this writer. Media Foundation's H.264 encoder only
+		/// requires MF_MT_AVG_BITRATE to be greater than zero; this floor is a practical sanity
+		/// bound, below which H.264 output at emulator resolutions/frame rates is unusable.
+		/// </summary>
+		public const int MinVideoBitrateKbps = 100;
+
+		/// <summary>
+		/// Highest video bitrate accepted by this writer (50 Mbps). As with
+		/// <see cref="MinVideoBitrateKbps"/>, this is a practical writer-imposed bound rather than
+		/// a Media Foundation limit; Media Foundation may still reject extreme bitrate/resolution
+		/// combinations, which are reported as explicit recording failures when a segment is opened.
+		/// </summary>
+		public const int MaxVideoBitrateKbps = 50_000;
+
+		private static readonly int[] SupportedAudioBitrateKbpsValues = [ 96, 128, 160, 192 ];
+
+		/// <summary>
+		/// Audio bitrates supported by the Media Foundation AAC encoder for mono/stereo input, in kbps.
+		/// These correspond to the documented MF_MT_AUDIO_AVG_BYTES_PER_SECOND values
+		/// 12000/16000/20000/24000 bytes per second; any other value is rejected by the encoder.
+		/// </summary>
+		public static readonly IReadOnlyList<int> SupportedAudioBitratesKbps = SupportedAudioBitrateKbpsValues;
+
+		public static bool IsSupportedVideoBitrateKbps(int videoBitrateKbps)
+			=> videoBitrateKbps >= MinVideoBitrateKbps && videoBitrateKbps <= MaxVideoBitrateKbps;
+
+		public static bool IsSupportedAudioBitrateKbps(int audioBitrateKbps)
+			=> Array.IndexOf(SupportedAudioBitrateKbpsValues, audioBitrateKbps) >= 0;
+
 		private const long TicksPerSecond = 10_000_000;
 		private const int QueueCapacity = 8;
 		private const int ProducerBackpressureTimeoutMs = 10_000;
 		private const int StartupTimeoutMs = 15_000;
 		private const int CloseTimeoutMs = 30_000;
 
-		private sealed class CodecToken : IDisposable
+		/// <summary>
+		/// Immutable video/audio bitrate settings for one recording, created either by the settings
+		/// dialog (<see cref="MediaFoundationMp4Writer.AcquireVideoCodecToken"/>) or from persisted
+		/// config values without UI (<see cref="LoadFromConfig(Config)"/>). Bitrates are stored in
+		/// kbps (1 kbps = 1000 bps) and converted to Media Foundation units when a segment's output
+		/// media types are built.
+		/// </summary>
+		public sealed class CodecToken : IDisposable
 		{
-			internal uint VideoBitrate { get; }
-			internal CodecToken(uint videoBitrate) => VideoBitrate = videoBitrate;
+			public int VideoBitrateKbps { get; }
+
+			public int AudioBitrateKbps { get; }
+
+			/// <summary>Video bitrate in bits per second, for MF_MT_AVG_BITRATE.</summary>
+			internal uint VideoBitrateBps => checked((uint) VideoBitrateKbps * 1000u);
+
+			/// <summary>Audio bitrate in bytes per second, for MF_MT_AUDIO_AVG_BYTES_PER_SECOND.</summary>
+			internal uint AudioAvgBytesPerSecond => checked((uint) AudioBitrateKbps * 1000u / 8u);
+
+			/// <exception cref="ArgumentOutOfRangeException">a bitrate is zero, negative, or otherwise unsupported</exception>
+			public CodecToken(int videoBitrateKbps, int audioBitrateKbps)
+			{
+				if (!IsSupportedVideoBitrateKbps(videoBitrateKbps))
+				{
+					throw new ArgumentOutOfRangeException(nameof(videoBitrateKbps), videoBitrateKbps, $"Video bitrate must be between {MinVideoBitrateKbps} and {MaxVideoBitrateKbps} kbps.");
+				}
+
+				if (!IsSupportedAudioBitrateKbps(audioBitrateKbps))
+				{
+					throw new ArgumentOutOfRangeException(nameof(audioBitrateKbps), audioBitrateKbps, $"Audio bitrate must be one of {string.Join(", ", SupportedAudioBitrateKbpsValues)} kbps (the values supported by the Media Foundation AAC encoder for mono/stereo audio).");
+				}
+
+				VideoBitrateKbps = videoBitrateKbps;
+				AudioBitrateKbps = audioBitrateKbps;
+			}
+
+			/// <summary>
+			/// Builds a token from persisted config values. Each value is validated independently:
+			/// a stale or hand-edited value that is zero, negative, or otherwise unsupported falls
+			/// back to that field's default instead of preventing recording (notably in the
+			/// unattended <see cref="MediaFoundationMp4Writer.SetDefaultVideoCodecToken(Config)"/>
+			/// path, where there is no dialog in which the value could be corrected). The settings
+			/// dialog validates strictly instead and rejects unsupported values.
+			/// </summary>
+			public static CodecToken LoadFromConfig(Config config)
+			{
+				if (config == null) throw new ArgumentNullException(nameof(config));
+				return new CodecToken(
+					IsSupportedVideoBitrateKbps(config.MfMp4VideoBitrateKbps) ? config.MfMp4VideoBitrateKbps : DefaultVideoBitrateKbps,
+					IsSupportedAudioBitrateKbps(config.MfMp4AudioBitrateKbps) ? config.MfMp4AudioBitrateKbps : DefaultAudioBitrateKbps);
+			}
+
 			public void Dispose() { }
 		}
 
@@ -72,8 +155,9 @@ namespace BizHawk.Client.EmuHawk
 			internal long AudioSampleFramesWritten;
 		}
 
+		private readonly IDialogParent _dialogParent;
 		private readonly object _producerLock = new object();
-		private CodecToken _codecToken = new CodecToken(DefaultVideoBitrate);
+		private CodecToken _codecToken = new CodecToken(DefaultVideoBitrateKbps, DefaultAudioBitrateKbps);
 		private BlockingCollection<Job> _queue;
 		private Thread _worker;
 		private ManualResetEventSlim _workerReady;
@@ -92,11 +176,7 @@ namespace BizHawk.Client.EmuHawk
 		private int _channels;
 		private int _bitsPerSample;
 
-		public MediaFoundationMp4Writer(IDialogParent dialogParent)
-		{
-			// The required constructor argument lets VideoWriterInventory create this class
-			// consistently with the other writers. The initial writer has no settings dialog.
-		}
+		public MediaFoundationMp4Writer(IDialogParent dialogParent) => _dialogParent = dialogParent;
 
 		public bool UsesAudio => true;
 		public bool UsesVideo => true;
@@ -111,10 +191,16 @@ namespace BizHawk.Client.EmuHawk
 		}
 
 		public void SetDefaultVideoCodecToken(Config config)
-			=> _codecToken = new CodecToken(DefaultVideoBitrate);
+			=> _codecToken = CodecToken.LoadFromConfig(config);
 
 		public IDisposable AcquireVideoCodecToken(Config config)
-			=> new CodecToken(DefaultVideoBitrate);
+		{
+			// Without a dialog parent there is no UI to show; fall back to the persisted
+			// (sanitized) settings rather than failing, matching SetDefaultVideoCodecToken.
+			return _dialogParent == null
+				? (IDisposable) CodecToken.LoadFromConfig(config)
+				: MediaFoundationMp4WriterForm.DoTokenForm(_dialogParent.AsWinFormsHandle(), config);
+		}
 
 		public string DesiredExtension() => "mp4";
 
@@ -435,9 +521,9 @@ namespace BizHawk.Client.EmuHawk
 			try
 			{
 				MfNative.Check(MfNative.MFCreateSinkWriterFromURL(path, IntPtr.Zero, IntPtr.Zero, out writer), "MFCreateSinkWriterFromURL");
-				videoOutput = CreateVideoOutputType(width, height, _codecToken.VideoBitrate);
+				videoOutput = CreateVideoOutputType(width, height, _codecToken.VideoBitrateBps);
 				videoInput = CreateVideoInputType(width, height);
-				audioOutput = CreateAudioOutputType();
+				audioOutput = CreateAudioOutputType(_codecToken.AudioAvgBytesPerSecond);
 				audioInput = CreateAudioInputType();
 
 				MfNative.Check(writer.AddStream(videoOutput, out var videoStream), "IMFSinkWriter.AddStream(video)");
@@ -589,8 +675,18 @@ namespace BizHawk.Client.EmuHawk
 			catch { MfNative.Release(type); throw; }
 		}
 
-		private IMFMediaType CreateAudioOutputType()
+		private IMFMediaType CreateAudioOutputType(uint avgBytesPerSecond)
 		{
+			// The supported audio bitrates (and therefore the codec token and settings dialog)
+			// cover the Media Foundation AAC encoder's mono/stereo values. The encoder also
+			// accepts 6-channel input, but only at six times those byte rates, which this writer
+			// does not offer; fail explicitly here instead of surfacing a bare
+			// MF_E_INVALIDMEDIATYPE from stream setup for other channel counts.
+			if (_channels != 1 && _channels != 2)
+			{
+				throw new InvalidOperationException($"Native MP4 writer only supports mono/stereo AAC audio bitrates ({string.Join(", ", SupportedAudioBitrateKbpsValues)} kbps); {_channels}-channel audio is unsupported.");
+			}
+
 			var type = CreateMediaType("audio output");
 			try
 			{
@@ -599,7 +695,7 @@ namespace BizHawk.Client.EmuHawk
 				SetUInt32(type, MfGuids.MtAudioNumChannels, checked((uint)_channels));
 				SetUInt32(type, MfGuids.MtAudioSamplesPerSecond, checked((uint)_sampleRate));
 				SetUInt32(type, MfGuids.MtAudioBitsPerSample, checked((uint)_bitsPerSample));
-				SetUInt32(type, MfGuids.MtAudioAvgBytesPerSecond, AudioBitrate / 8);
+				SetUInt32(type, MfGuids.MtAudioAvgBytesPerSecond, avgBytesPerSecond);
 				SetUInt32(type, MfGuids.MtAacPayloadType, 0); // raw AAC access units in MP4
 				SetUInt32(type, MfGuids.MtAacAudioProfileLevelIndication, 0x29); // AAC-LC, level 2
 				return type;

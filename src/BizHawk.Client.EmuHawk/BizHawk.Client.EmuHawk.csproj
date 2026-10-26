@@ -57,6 +57,9 @@
 		<Compile Update="AVOut/JMDForm.cs" SubType="Form" />
 		<Compile Update="AVOut/JMDForm.Designer.cs" DependentUpon="JMDForm.cs" />
 		<EmbeddedResource Update="AVOut/JMDForm.resx" DependentUpon="JMDForm.cs" />
+		<Compile Update="AVOut/MediaFoundationMp4WriterForm.cs" SubType="Form" />
+		<Compile Update="AVOut/MediaFoundationMp4WriterForm.Designer.cs" DependentUpon="MediaFoundationMp4WriterForm.cs" />
+		<EmbeddedResource Update="AVOut/MediaFoundationMp4WriterForm.resx" DependentUpon="MediaFoundationMp4WriterForm.cs" />
 		<Compile Update="AVOut/NumericTextBox.cs" SubType="Component" />
 		<Compile Update="AVOut/SynclessRecordingTools.cs" SubType="Form" />
 		<Compile Update="AVOut/SynclessRecordingTools.Designer.cs" DependentUpon="SynclessRecordingTools.cs" />

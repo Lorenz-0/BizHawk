@@ -423,8 +423,10 @@ namespace BizHawk.Client.EmuHawk
 		}
 
 		/// <summary>
-		/// Finalizes the recording and never throws. Finalization failures are reported by
-		/// <see cref="CloseFile()"/>, which callers invoke where an error can be shown.
+		/// Requests finalization and never throws. Close failures are reported by
+		/// <see cref="CloseFile()"/>, which callers invoke where an error can be shown. After a close
+		/// timeout this does not wait again while the worker is still running; the worker finishes on
+		/// its own and releases its Media Foundation resources when it exits.
 		/// </summary>
 		public void Dispose()
 		{
@@ -434,7 +436,8 @@ namespace BizHawk.Client.EmuHawk
 			}
 			catch
 			{
-				// see doc comment; the writer is already in a closed state
+				// Finalization errors are reported by CloseFile; Dispose is the last-resort callers
+				// use during teardown, where throwing would leave the caller half-reset.
 			}
 		}
 
@@ -498,7 +501,13 @@ namespace BizHawk.Client.EmuHawk
 
 				foreach (var job in _queue.GetConsumingEnumerable())
 				{
-					if (ReadFailure() != null) break;
+					if (ReadFailure() != null)
+					{
+						// The job was dequeued before the failure check, so return its buffer here;
+						// the switch below never runs for it.
+						if (job.Kind == JobKind.Video) _framePool.Return(job.Pixels);
+						break;
+					}
 					switch (job.Kind)
 					{
 						case JobKind.Video:

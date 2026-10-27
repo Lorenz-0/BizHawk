@@ -3525,16 +3525,27 @@ namespace BizHawk.Client.EmuHawk
 				// capture teardown must still run so the client returns to a usable state.
 				ShowMessageBox(owner: null, $"A/V capture stopped, but the recording may be incomplete:\n\n{e.Message}");
 			}
-			_currAviWriter.Dispose();
-			_currAviWriter = null;
-			MovieSession.IsAvDumpActive = false;
-			AddOnScreenMessage("A/V capture stopped");
-			AVStatusLabel.Image = Properties.Resources.Blank;
-			AVStatusLabel.ToolTipText = "";
-			AVStatusLabel.Visible = false;
-			_aviSoundInputAsync = null;
-			_dumpProxy = null; // return to normal sound output
-			RewireSound();
+			finally
+			{
+				try
+				{
+					_currAviWriter.Dispose();
+				}
+				catch (Exception e)
+				{
+					// Some writers retry their close in Dispose; the outcome was already reported above.
+					StallDiag.Note($"A/V writer dispose failed: {e.Message}");
+				}
+				_currAviWriter = null;
+				MovieSession.IsAvDumpActive = false;
+				AddOnScreenMessage("A/V capture stopped");
+				AVStatusLabel.Image = Properties.Resources.Blank;
+				AVStatusLabel.ToolTipText = "";
+				AVStatusLabel.Visible = false;
+				_aviSoundInputAsync = null;
+				_dumpProxy = null; // return to normal sound output
+				RewireSound();
+			}
 			if (jmdPathToAutoConvert is not null)
 			{
 				JmdMp4Exporter.RunForRecording(this, Config, jmdPathToAutoConvert);

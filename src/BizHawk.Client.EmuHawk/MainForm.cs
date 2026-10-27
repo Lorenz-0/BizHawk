@@ -2160,7 +2160,17 @@ namespace BizHawk.Client.EmuHawk
 		private void Shutdown()
 		{
 			_jmdAutoConvertPath = null;
-			_currAviWriter?.CloseFile();
+			try
+			{
+				_currAviWriter?.CloseFile();
+			}
+			catch (Exception e)
+			{
+				if (!IsDisposed)
+				{
+					ShowMessageBox(owner: null, $"A/V capture could not be finalized cleanly:\n\n{e.Message}");
+				}
+			}
 			_currAviWriter = null;
 			MovieSession.IsAvDumpActive = false;
 		}
@@ -3505,7 +3515,16 @@ namespace BizHawk.Client.EmuHawk
 
 			var jmdPathToAutoConvert = _jmdAutoConvertPath;
 			_jmdAutoConvertPath = null;
-			_currAviWriter.CloseFile();
+			try
+			{
+				_currAviWriter.CloseFile();
+			}
+			catch (Exception e)
+			{
+				// CloseFile may report a finalization failure (the native MP4 writer does);
+				// capture teardown must still run so the client returns to a usable state.
+				ShowMessageBox(owner: null, $"A/V capture stopped, but the recording may be incomplete:\n\n{e.Message}");
+			}
 			_currAviWriter.Dispose();
 			_currAviWriter = null;
 			MovieSession.IsAvDumpActive = false;

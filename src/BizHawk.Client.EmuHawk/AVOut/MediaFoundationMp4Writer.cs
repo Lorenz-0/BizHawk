@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -157,13 +158,29 @@ namespace BizHawk.Client.EmuHawk
 
 		private readonly IDialogParent _dialogParent;
 		private readonly object _producerLock = new object();
+
+		/// <summary>
+		/// Backing store for the frame copies queued to the worker. <see cref="ArrayPool{T}.Shared"/>
+		/// ignores arrays above one million elements (roughly 720p of pixels), so it would allocate a
+		/// fresh array per 1080p frame; this pool covers up to 4K. Buckets are allocated on demand, so
+		/// the cap costs nothing until the matching frame size is actually recorded.
+		/// </summary>
+		private readonly ArrayPool<int> _framePool = ArrayPool<int>.Create(3840 * 2160, QueueCapacity);
+
 		private CodecToken _codecToken = new CodecToken(DefaultVideoBitrateKbps, DefaultAudioBitrateKbps);
+
+		/// <summary>
+		/// Token captured by <see cref="OpenFile(string)"/> and read only by the worker thread, so
+		/// changing the writer's token mid-recording cannot affect later segments of that recording.
+		/// </summary>
+		private CodecToken _activeCodecToken;
 		private BlockingCollection<Job> _queue;
 		private Thread _worker;
 		private ManualResetEventSlim _workerReady;
 		private Exception _startupFailure;
 		private Exception _failure;
 		private bool _closing;
+		private bool _closeTimedOut;
 
 		private string _directory;
 		private string _fileStem;
@@ -181,6 +198,11 @@ namespace BizHawk.Client.EmuHawk
 		public bool UsesAudio => true;
 		public bool UsesVideo => true;
 
+		/// <summary>
+		/// Sets the codec token used by the next recording. The value is captured by
+		/// <see cref="OpenFile(string)"/>; calling this while a recording is open takes effect only
+		/// after that recording is closed.
+		/// </summary>
 		public void SetVideoCodecToken(IDisposable token)
 		{
 			if (!(token is CodecToken nativeToken))
@@ -281,6 +303,7 @@ namespace BizHawk.Client.EmuHawk
 				_failure = null;
 				_startupFailure = null;
 				_closing = false;
+				_activeCodecToken = _codecToken;
 				_queue = new BlockingCollection<Job>(QueueCapacity);
 				_workerReady = new ManualResetEventSlim(false);
 
@@ -314,7 +337,7 @@ namespace BizHawk.Client.EmuHawk
 			{
 				var startupError = _startupFailure;
 				if (_worker != null && _worker.Join(5_000)) ClearStoppedWorker();
-				throw new IOException("Windows Media Foundation could not initialize the MP4 recording. Check that this Windows installation provides the Media Foundation H.264 and AAC encoders.", startupError);
+				throw new IOException($"Windows Media Foundation could not start the MP4 recording: {startupError.Message}", startupError);
 			}
 		}
 
@@ -336,11 +359,20 @@ namespace BizHawk.Client.EmuHawk
 					throw new InvalidOperationException("The video provider returned a buffer shorter than the configured frame dimensions.");
 				}
 
-				// IVideoProvider buffers are live emulator-owned memory. Copy before returning
-				// to the emulation loop, rather than letting the worker race the next frame.
-				var copy = new int[count];
-				Array.Copy(sourcePixels, 0, copy, 0, count);
-				EnqueueLocked(Job.ForVideo(copy, _width, _height));
+				// IVideoProvider buffers are live emulator-owned memory. Rent a pooled buffer and
+				// copy before returning to the emulation loop, rather than letting the worker race
+				// the next frame; the worker returns the buffer once the frame has been encoded.
+				var copy = _framePool.Rent(count);
+				try
+				{
+					Array.Copy(sourcePixels, 0, copy, 0, count);
+					EnqueueLocked(Job.ForVideo(copy, _width, _height));
+				}
+				catch
+				{
+					_framePool.Return(copy);
+					throw;
+				}
 			}
 		}
 
@@ -367,6 +399,9 @@ namespace BizHawk.Client.EmuHawk
 			{
 				worker = _worker;
 				if (worker == null) return;
+				// A previous close already reported a wedge. Don't block again on a worker that is
+				// still stuck (close runs on the UI thread); retry only once it has exited.
+				if (_closeTimedOut && worker.IsAlive) return;
 				if (!_closing)
 				{
 					_closing = true;
@@ -378,17 +413,29 @@ namespace BizHawk.Client.EmuHawk
 			{
 				// COM calls are never forcibly aborted from the UI thread. Report the wedge
 				// explicitly rather than making the client wait forever in CloseFile().
+				lock (_producerLock) _closeTimedOut = true;
 				throw new TimeoutException($"Media Foundation did not finish/close the MP4 within {CloseTimeoutMs} ms. The output may be incomplete.");
 			}
 
 			var failure = ReadFailure();
 			ClearStoppedWorker();
-			if (failure != null) throw new IOException("Native MP4 recording failed; the output may be incomplete.", failure);
+			if (failure != null) throw new IOException($"Native MP4 recording failed; the output may be incomplete: {failure.Message}", failure);
 		}
 
+		/// <summary>
+		/// Finalizes the recording and never throws. Finalization failures are reported by
+		/// <see cref="CloseFile()"/>, which callers invoke where an error can be shown.
+		/// </summary>
 		public void Dispose()
 		{
-			CloseFile();
+			try
+			{
+				CloseFile();
+			}
+			catch
+			{
+				// see doc comment; the writer is already in a closed state
+			}
 		}
 
 		private void EnsureNotOpen(string parameter)
@@ -455,11 +502,18 @@ namespace BizHawk.Client.EmuHawk
 					switch (job.Kind)
 					{
 						case JobKind.Video:
-							if (job.Width != segment.Width || job.Height != segment.Height)
+							try
 							{
-								throw new InvalidOperationException("A queued video frame does not match the active MP4 segment dimensions.");
+								if (job.Width != segment.Width || job.Height != segment.Height)
+								{
+									throw new InvalidOperationException("A queued video frame does not match the active MP4 segment dimensions.");
+								}
+								WriteVideo(segment, job.Pixels);
 							}
-							WriteVideo(segment, job.Pixels);
+							finally
+							{
+								_framePool.Return(job.Pixels);
+							}
 							break;
 						case JobKind.Audio:
 							WriteAudio(segment, job.Samples);
@@ -521,9 +575,9 @@ namespace BizHawk.Client.EmuHawk
 			try
 			{
 				MfNative.Check(MfNative.MFCreateSinkWriterFromURL(path, IntPtr.Zero, IntPtr.Zero, out writer), "MFCreateSinkWriterFromURL");
-				videoOutput = CreateVideoOutputType(width, height, _codecToken.VideoBitrateBps);
+				videoOutput = CreateVideoOutputType(width, height, _activeCodecToken.VideoBitrateBps);
 				videoInput = CreateVideoInputType(width, height);
-				audioOutput = CreateAudioOutputType(_codecToken.AudioAvgBytesPerSecond);
+				audioOutput = CreateAudioOutputType(_activeCodecToken.AudioAvgBytesPerSecond);
 				audioInput = CreateAudioInputType();
 
 				MfNative.Check(writer.AddStream(videoOutput, out var videoStream), "IMFSinkWriter.AddStream(video)");
@@ -586,13 +640,13 @@ namespace BizHawk.Client.EmuHawk
 
 		private void WriteVideo(SegmentContext segment, int[] pixels)
 		{
-			var bytes = new byte[checked(pixels.Length * sizeof(int))];
-			// BizHawk's int pixel buffer is laid out as BGRA bytes on little-endian Windows;
-			// MFVideoFormat_RGB32 consumes B,G,R,X bytes, so a bitwise copy is appropriate.
-			Buffer.BlockCopy(pixels, 0, bytes, 0, bytes.Length);
+			var count = checked(segment.Width * segment.Height);
 			var start = VideoTicks(segment.VideoFramesWritten);
 			var end = VideoTicks(segment.VideoFramesWritten + 1);
-			WriteSample(segment.Writer, segment.VideoStream, bytes, start, end - start, "video frame");
+			// BizHawk's int pixel buffer is laid out as BGRA bytes on little-endian Windows;
+			// MFVideoFormat_RGB32 consumes B,G,R,X bytes, so a direct int copy is appropriate.
+			WriteSample(segment.Writer, segment.VideoStream, checked(count * sizeof(int)), start, end - start, "video frame",
+				destination => Marshal.Copy(pixels, 0, destination, count));
 			segment.VideoFramesWritten++;
 		}
 
@@ -600,15 +654,21 @@ namespace BizHawk.Client.EmuHawk
 		{
 			var sampleFrames = samples.Length / _channels;
 			if (sampleFrames == 0) return;
-			var bytes = new byte[checked(samples.Length * sizeof(short))];
-			Buffer.BlockCopy(samples, 0, bytes, 0, bytes.Length);
 			var start = AudioTicks(segment.AudioSampleFramesWritten);
 			var end = AudioTicks(segment.AudioSampleFramesWritten + sampleFrames);
-			WriteSample(segment.Writer, segment.AudioStream, bytes, start, end - start, "audio samples");
+			WriteSample(segment.Writer, segment.AudioStream, checked(samples.Length * sizeof(short)), start, end - start, "audio samples",
+				destination => Marshal.Copy(samples, 0, destination, samples.Length));
 			segment.AudioSampleFramesWritten += sampleFrames;
 		}
 
-		private void WriteSample(IMFSinkWriter writer, int stream, byte[] data, long time, long duration, string description)
+		private void WriteSample(
+			IMFSinkWriter writer,
+			int stream,
+			int byteLength,
+			long time,
+			long duration,
+			string description,
+			Action<IntPtr> copyToBuffer)
 		{
 			IMFSample sample = null;
 			IMFMediaBuffer buffer = null;
@@ -616,14 +676,14 @@ namespace BizHawk.Client.EmuHawk
 			try
 			{
 				MfNative.Check(MfNative.MFCreateSample(out sample), "MFCreateSample(" + description + ")");
-				MfNative.Check(MfNative.MFCreateMemoryBuffer(checked((uint)data.Length), out buffer), "MFCreateMemoryBuffer(" + description + ")");
+				MfNative.Check(MfNative.MFCreateMemoryBuffer(checked((uint)byteLength), out buffer), "MFCreateMemoryBuffer(" + description + ")");
 				MfNative.Check(buffer.Lock(out var destination, out var maxLength, out _), "IMFMediaBuffer.Lock(" + description + ")");
 				locked = true;
-				if (maxLength < data.Length) throw new InvalidOperationException("Media Foundation returned a short sample buffer.");
-				Marshal.Copy(data, 0, destination, data.Length);
+				if (maxLength < byteLength) throw new InvalidOperationException("Media Foundation returned a short sample buffer.");
+				copyToBuffer(destination);
 				MfNative.Check(buffer.Unlock(), "IMFMediaBuffer.Unlock(" + description + ")");
 				locked = false;
-				MfNative.Check(buffer.SetCurrentLength(checked((uint)data.Length)), "IMFMediaBuffer.SetCurrentLength(" + description + ")");
+				MfNative.Check(buffer.SetCurrentLength(checked((uint)byteLength)), "IMFMediaBuffer.SetCurrentLength(" + description + ")");
 				MfNative.Check(sample.AddBuffer(buffer), "IMFSample.AddBuffer(" + description + ")");
 				MfNative.Check(sample.SetSampleTime(time), "IMFSample.SetSampleTime(" + description + ")");
 				MfNative.Check(sample.SetSampleDuration(duration), "IMFSample.SetSampleDuration(" + description + ")");
@@ -760,7 +820,9 @@ namespace BizHawk.Client.EmuHawk
 					_workerReady.Dispose();
 					_workerReady = null;
 				}
+				_activeCodecToken = null;
 				_closing = false;
+				_closeTimedOut = false;
 			}
 		}
 

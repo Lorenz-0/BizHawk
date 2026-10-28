@@ -876,6 +876,24 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 				Analog,
 			}
 
+			// The native renderer accepts scales 1-8, but BizHawk's fixed output buffer is only
+			// sized for 1x/2x at standard retail VI dimensions (up to 720x576 at 4:3/16:9).
+			// Out-of-spec VI dimensions or timing (cheats, corrupted state, native overrides) can
+			// overflow it at any scale; a native capacity guard is future work.
+			// See Dolphin.IVideoProvider._vbuf for the capacity analysis.
+			public enum InternalResolutionLevels
+			{
+				Native = 1,
+				Double = 2,
+			}
+
+			[DisplayName("Internal Resolution")]
+			[Description("Renders 3D graphics at native (1x) or double (2x) resolution. Sized for standard retail video dimensions only; out-of-spec VI values (cheats, corrupted state, native overrides) can exceed the native output buffer. Changing this requires a core reboot.")]
+			[Category("Settings")]
+			[DefaultValue(InternalResolutionLevels.Native)]
+			[Browsable(true)]
+			public InternalResolutionLevels InternalResolution { get; set; }
+
 			[DisplayName("Aspect Ratio")]
 			[Description("")]
 			[Category("Settings")]

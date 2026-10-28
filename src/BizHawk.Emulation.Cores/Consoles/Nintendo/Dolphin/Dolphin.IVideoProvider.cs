@@ -91,8 +91,15 @@ namespace BizHawk.Emulation.Cores.Consoles.Nintendo.Dolphin
 		public int BackgroundColor => 0;
 
 		/// <remarks>
-		/// the native library blits straight into this buffer (no callback into managed code),
-		/// sized for the tallest interlaced field Dolphin can produce at the widest NTSC/PAL width
+		/// the native library blits straight into this buffer (no callback into managed code) and
+		/// does not check its capacity. It is sized for the tallest interlaced field Dolphin can
+		/// produce at the widest NTSC/PAL width. For standard retail VI output (XFB up to 720x576
+		/// at 4:3 or 16:9), 2x internal resolution tops out at 2048x1152 (720x576 doubled, widened
+		/// to 16:9) = 2,359,296 ints, 87% of this buffer; 3x would need at least
+		/// 640*528*9 = 3,041,280 ints, so <see cref="DolphinGFXSettings.InternalResolution"/> is
+		/// capped at 2x. Out-of-spec VI dimensions or timing (e.g. from cheats, corrupted state,
+		/// or dolphin-native-overrides.txt) are not bounded by this buffer at any scale; a native
+		/// capacity check is future work.
 		/// </remarks>
 		private readonly int[] _vbuf = new int[640 * 528 * 8];
 
